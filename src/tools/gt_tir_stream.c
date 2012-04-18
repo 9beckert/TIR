@@ -25,6 +25,7 @@
 #include "extended/node_stream_api.h"
 #include "match/esa-maxpairs.h"
 #include "match/esa-seqread.h"
+#include "tools/gt_tir_stream.h"
 
 
 typedef struct
@@ -72,8 +73,7 @@ static int gt_store_seeds(void *info,
                 seqnum2;
   bool samecontig = false;
   bool diffstrands = false;
-  GtEncseq *encseq = encseq;
-  GtArraySeed *seeds = (GTArraySeed *) info;
+  GtArraySeed *seeds = (GtArraySeed *) info;
 
   gt_error_check(err);
   
@@ -103,7 +103,7 @@ static int gt_store_seeds(void *info,
     Seed *nextfreeseedpointer;
     
     //TODO was bedeutet die 10??
-    GT_GETNEXTFREEINARRAY(nextfreeseedpointer, &seeds,
+    GT_GETNEXTFREEINARRAY(nextfreeseedpointer, seeds,
                        Seed, 10);
     
     nextfreeseedpointer->pos1 = pos1;
@@ -119,7 +119,7 @@ static int gt_store_seeds(void *info,
  * saves the next node of the annotation graph in gn
  */
 static int gt_tir_stream_next(GT_UNUSED GtNodeStream *ns,
-                              GtGenomeNode **gn,
+                              GT_UNUSED GtGenomeNode **gn,
                               GtError *err)
 {
   // TODO magic has to be understood
@@ -161,6 +161,7 @@ static int gt_tir_stream_next(GT_UNUSED GtNodeStream *ns,
   
   /* magic has to happen here */
   
+  return 0;
 }
 
 /*
@@ -221,4 +222,7 @@ GtNodeStream* gt_tir_stream_new(GtStr *str_indexname,
   {
     return ns;
   }
+  
+  // TODO
+  return NULL;
 }

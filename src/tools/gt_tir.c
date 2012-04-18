@@ -24,6 +24,7 @@
 #include "core/ma.h"
 #include "core/unused_api.h"
 #include "tools/gt_tir.h"
+#include "tools/gt_tir_stream.h"
 
 /* struct with all arguments */
 typedef struct {
@@ -101,7 +102,7 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   gt_error_check(err);
   gt_assert(arguments);
 
-  /* XXX: do some checking after the option have been parsed (usally this is not
+   XXX: do some checking after the option have been parsed (usally this is not
      necessary and this function can be removed completely). 
   if (gt_str_length(arguments->str_option_tir))
     printf("%s\n", gt_str_get(arguments->str_option_tir));
@@ -112,7 +113,7 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
 /*
  * Print arguments to console.
  */
-static void gt_ltrharvest_showargsline(int argc, const char **argv)
+static void gt_tir_showargsline(int argc, const char **argv)
 {
   int i;
   gt_assert(argv && argc >= 1);
@@ -128,34 +129,35 @@ static void gt_ltrharvest_showargsline(int argc, const char **argv)
  * Here is the action!!! :)
  */
 static int gt_tir_runner(int argc, const char **argv, 
-  int parsed_args,	      // all arguments till parsed_args were processed already
+  GT_UNUSED int parsed_args,	      // all arguments till parsed_args were processed already
   void *tool_arguments,   // argument struct
   GT_UNUSED GtError *err) // error messages
 {
   /* Here we'll add nodestream later */
   
   GtTirArguments *arguments = tool_arguments;
+  GtNodeStream *tir_stream;
   int had_err = 0;
 
   gt_error_check(err);
   gt_assert(arguments);
 
   /* Create TIR stream MUHAHA */
-  tir_stream = gt_tir_stream_new(argruments->str_indexname,
+  tir_stream = gt_tir_stream_new(arguments->str_indexname,
                                  arguments->minseedlength,
                                  err);
   
-  if (ltrh_stream == NULL)
+  if (tir_stream == NULL)
   {
     return -1;
   }
   
   /* output arguments line */
-  gt_ltrharvest_showargsline(argc, argv);
+  gt_tir_showargsline(argc, argv);
   
   /* pull the features through the stream and free them afterwards */
   if (!had_err)
-    had_err = gt_node_stream_pull(last_stream, err);
+    had_err = gt_node_stream_pull(tir_stream, err);
     
   /* free */
   gt_node_stream_delete(tir_stream);
