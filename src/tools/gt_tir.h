@@ -1,5 +1,6 @@
 /*
   Copyright (c) 2012 Manuela Beckert <9beckert@informatik.uni-hamburg.de>
+  Copyright (c) 2012 Dorle Osterode <9osterod@informatik.uni-hamburg.de>
   Copyright (c) 2012 Center for Bioinformatics, University of Hamburg
 
   Permission to use, copy, modify, and distribute this software for any
@@ -14,6 +15,11 @@
   ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
   OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
+
+/*
+ * Finds Terminal Inverted Repeats and does... something... with them.
+ * To be edited when we know more.
+ */
 
 #ifndef GT_TIR_H
 #define GT_TIR_H

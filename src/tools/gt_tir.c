@@ -1,5 +1,6 @@
 /*
   Copyright (c) 2012 Manuela Beckert <9beckert@informatik.uni-hamburg.de>
+  Copyright (c) 2012 Dorle Osterode <9osterod@informatik.uni-hamburg.de>
   Copyright (c) 2012 Center for Bioinformatics, University of Hamburg
 
   Permission to use, copy, modify, and distribute this software for any
@@ -15,17 +16,24 @@
   OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
 
+/*
+ * Finds Terminal Inverted Repeats and does... something... with them.
+ * To be edited when we know more.
+ */
+
 #include "core/ma.h"
 #include "core/unused_api.h"
 #include "tools/gt_tir.h"
 
-// Struktur mit allen Parametern
+/* struct with all arguments */
 typedef struct {
-  GtStr *str_indexname;         // darüber wird enhanced suffix array eingelesen
+  GtStr *str_indexname;         // for reading of the enhanced suffix array
   unsigned long minseedlength;
 } GtTirArguments;
 
-// Struktur initialisieren und löschen
+/*
+ * Initializes the argument struct.
+ */
 static void* gt_tir_arguments_new(void)
 {
   GtTirArguments *arguments = gt_calloc(1, sizeof *arguments);
@@ -33,6 +41,9 @@ static void* gt_tir_arguments_new(void)
   return arguments;
 }
 
+/*
+ * Deletes the argument struct.
+ */
 static void gt_tir_arguments_delete(void *tool_arguments)
 {
   GtTirArguments *arguments = tool_arguments;
@@ -41,7 +52,9 @@ static void gt_tir_arguments_delete(void *tool_arguments)
   gt_free(arguments);
 }
 
-// Abhängigkeiten
+/*
+ * Sets dependencies between arguments
+ */
 static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
 {
   GtTirArguments *arguments = tool_arguments;
@@ -52,22 +65,16 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   gt_assert(arguments);
 
   /* init */
-  op = gt_option_parser_new("[option ...] -index <indexname>", // Beschreibung der Syntax
+  op = gt_option_parser_new("[option ...] -index <indexname>", // syntax description
                          "Predict Terminal Inverted Repeats (TIR)."); 
 
-  // Optionen hinzufügen
-  /* -bool */
-  //option = gt_option_new_bool("bool", "bool option tir",	// Name, kurze Beschreibung
-  //                         &arguments->bool_option_tir, false);	// Zeiger auf Ergebnisstelle, default Wert
-  //gt_option_parser_add_option(op, option);	// Einhängen in Parser
-
   /* -index */
-  optionindex = gt_option_new_string("index",
-                             "specify the name of the enhanced suffix "
-                             "array index (mandatory)",
-                             arguments->str_indexname, NULL);
+  optionindex = gt_option_new_string("index",         // name
+                     "specify the name of the enhanced suffix " // short description
+                     "array index (mandatory)",
+                     arguments->str_indexname, NULL); // pointer to result, default value 
   gt_option_is_mandatory(optionindex);
-  gt_option_parser_add_option(op, optionindex);
+  gt_option_parser_add_option(op, optionindex);       // add to parser
   
    /* -seed */
   optionseed = gt_option_new_ulong_min("seed",
@@ -81,13 +88,16 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   return op;
 }
 
-// Überprüfen ob zusätzliche Bedingungen erfüllt sind 
+/*
+ * Check for further dependencies.
+ * Currently not needed.
+ */
 /*static int gt_tir_arguments_check(GT_UNUSED int rest_argc,
                                        void *tool_arguments,
                                        GT_UNUSED GtError *err)
 {
   GtTirArguments *arguments = tool_arguments;
-  int had_err = 0; // sagt aus, ob Fehler aufgetreten ist, 0 kein Fehler, <0 Fehler
+  int had_err = 0; // 0 no error, <0 error
   gt_error_check(err);
   gt_assert(arguments);
 
@@ -99,7 +109,9 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   return had_err;
 }*/
 
-/* Ausgabe der Parameter an der Konsole */
+/*
+ * Print arguments to console.
+ */
 static void gt_ltrharvest_showargsline(int argc, const char **argv)
 {
   int i;
@@ -112,14 +124,15 @@ static void gt_ltrharvest_showargsline(int argc, const char **argv)
   printf("\n");
 }
 
-// Tatsächliche Methode, hier passiert die Action! :)
-
+/*
+ * Here is the action!!! :)
+ */
 static int gt_tir_runner(int argc, const char **argv, 
-  int parsed_args,	      // alle Optionen bis parsed_args wurden bereits bearbeitet
-  void *tool_arguments,   // Argumentstruktur
-  GT_UNUSED GtError *err) // Fehlermeldungen
+  int parsed_args,	      // all arguments till parsed_args were processed already
+  void *tool_arguments,   // argument struct
+  GT_UNUSED GtError *err) // error messages
 {
-  // Hier kommt später mal Nodestream
+  /* Here we'll add nodestream later */
   
   GtTirArguments *arguments = tool_arguments;
   int had_err = 0;
@@ -127,7 +140,7 @@ static int gt_tir_runner(int argc, const char **argv,
   gt_error_check(err);
   gt_assert(arguments);
 
-  // TIR  stream erzeugen MUHAHA
+  /* Create TIR stream MUHAHA */
   tir_stream = gt_tir_stream_new(argruments->str_indexname,
                                  arguments->minseedlength,
                                  err);
@@ -150,7 +163,11 @@ static int gt_tir_runner(int argc, const char **argv,
   return had_err;
 }
 
-// Hier wird alles zusammengeführt, Angabe was verknüpft wird, wo null steht wird nicht angesprungen
+
+/* 
+ * Combination of everything,
+ * NULL-arguments won't be added.
+ */
 GtTool* gt_tir(void)
 {
   return gt_tool_new(gt_tir_arguments_new,
