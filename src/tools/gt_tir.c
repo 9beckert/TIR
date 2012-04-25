@@ -23,6 +23,7 @@
 
 #include "core/ma.h"
 #include "core/unused_api.h"
+#include "ltr/ltr_xdrop.h"
 #include "tools/gt_tir.h"
 #include "tools/gt_tir_stream.h"
 
@@ -30,6 +31,9 @@
 typedef struct {
   GtStr *str_indexname;         // for reading of the enhanced suffix array
   unsigned long minseedlength;
+  Arbitraryscores arbitscores;
+  int xdrop_belowscore;
+  double similarity_threshold;
 } GtTirArguments;
 
 /*
@@ -60,8 +64,14 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
 {
   GtTirArguments *arguments = tool_arguments;
   GtOptionParser *op;
-  GtOption *optionindex,
-           *optionseed;
+  GtOption *optionindex,  /* index */
+           *optionseed,   /* minseedlength */ 
+           *optionmat,    /* arbitrary scores */
+           *optionmis,
+           *optionins,
+           *optiondel,
+           *optionxdrop,  /* xdropbelowscore for extension alignment */
+           *optionsimilar;/* similarity threshold */
   
   gt_assert(arguments);
 
@@ -85,6 +95,61 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
                                20UL,
                                2UL);
   gt_option_parser_add_option(op, optionseed); 
+  
+  /* arbitrary scores */
+  
+  /* -mat */
+  arguments->arbitscores.gcd  = 1;      /* set only for initialization,
+                                        do not change! */
+  optionmat = gt_option_new_int_min("mat",
+                        "specify matchscore for extension-alignment",
+                        &arguments->arbitscores.mat,
+                        2,
+                        1);
+  gt_option_parser_add_option(op, optionmat);
+
+  /* -mis */
+  optionmis = gt_option_new_int_max("mis",
+                        "specify mismatchscore for extension-alignment",
+                        &arguments->arbitscores.mis,
+                        -2,
+                        -1);
+  gt_option_parser_add_option(op, optionmis);
+
+  /* -ins */
+  optionins = gt_option_new_int_max("ins",
+                        "specify insertionscore for extension-alignment",
+                        &arguments->arbitscores.ins,
+                        -3,
+                        -1);
+  gt_option_parser_add_option(op, optionins);
+
+  /* -del */
+  optiondel = gt_option_new_int_max("del",
+                        "specify deletionscore for extension-alignment",
+                        &arguments->arbitscores.del,
+                        -3,
+                        -1);
+  gt_option_parser_add_option(op, optiondel);
+  
+  
+  /* -xdrop */
+  optionxdrop = gt_option_new_int_min("xdrop",
+                        "specify xdropbelowscore for extension-alignment",
+                        &arguments->xdrop_belowscore,
+                        (int)5,
+                        (int)0);
+  gt_option_parser_add_option(op, optionxdrop);
+  
+  /* -similar */
+  optionsimilar = gt_option_new_double_min_max("similar",
+                               "specify similaritythreshold in "
+                               "range [1..100%]",
+                               &arguments->similarity_threshold,
+                               (double) 85.0,
+                               (double) 0.0,
+                               100.0);
+  gt_option_parser_add_option(op, optionsimilar);
 
   return op;
 }
@@ -133,8 +198,6 @@ static int gt_tir_runner(int argc, const char **argv,
   void *tool_arguments,   // argument struct
   GtError *err) // error messages
 {
-  /* Here we'll add nodestream later */
-  
   GtTirArguments *arguments = tool_arguments;
   GtNodeStream *tir_stream;
   int had_err = 0;
@@ -145,6 +208,9 @@ static int gt_tir_runner(int argc, const char **argv,
   /* Create TIR stream MUHAHA */
   tir_stream = gt_tir_stream_new(arguments->str_indexname,
                                  arguments->minseedlength,
+                                 arguments->arbitscores,
+                                 arguments->xdrop_belowscore,
+                                 arguments->similarity_threshold,
                                  err);
   
   if (tir_stream == NULL)

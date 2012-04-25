@@ -26,6 +26,9 @@ typedef struct GtTIRStream GtTIRStream;
 
 const GtNodeStreamClass* gt_tir_stream_class(void);
 GtNodeStream*            gt_tir_stream_new(GtStr *str_indexname,
-                                           unsigned long minseedlength,
-                                           GtError *err);
+                                unsigned long minseedlength,
+                                Arbitraryscores arbitscores,
+                                int xdrop_belowscore,
+                                double similarity_threshold,
+                                GtError *err);
 #endif
