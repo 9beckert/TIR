@@ -82,8 +82,8 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
                                "specify minimum seed length for"
                                " exact repeats",
                                &arguments->minseedlength,
-                               30UL,
-                               1UL);
+                               20UL,
+                               2UL);
   gt_option_parser_add_option(op, optionseed); 
 
   return op;
@@ -131,7 +131,7 @@ static void gt_tir_showargsline(int argc, const char **argv)
 static int gt_tir_runner(int argc, const char **argv, 
   GT_UNUSED int parsed_args,	      // all arguments till parsed_args were processed already
   void *tool_arguments,   // argument struct
-  GT_UNUSED GtError *err) // error messages
+  GtError *err) // error messages
 {
   /* Here we'll add nodestream later */
   

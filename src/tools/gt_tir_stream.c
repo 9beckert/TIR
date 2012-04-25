@@ -64,45 +64,70 @@ static int gt_store_seeds(void *info,
                           unsigned long len,
                           unsigned long pos1,
                           unsigned long pos2,
-                          GT_UNUSED GtError *err)
+                          GtError *err)
 {
-  unsigned long offset;
-  unsigned long length_encseq;
+  unsigned long offset = 0;
   unsigned long contignumber = 0,
                 seqnum1,
                 seqnum2;
+  unsigned long num_of_contigs;
+  unsigned long contig_length;
+  unsigned long offset_pos1;
+  unsigned long offset_pos2;
+  unsigned long startpos_contig1;
+  unsigned long startpos_contig2;
+  unsigned long tmp = 0;
   bool samecontig = false;
   bool diffstrands = false;
+  bool direction = false;
   GtArraySeed *seeds = (GtArraySeed *) info;
 
   gt_error_check(err);
   
-  /* different strands */
-  length_encseq = gt_encseq_seqlength(encseq, contignumber);
-  if(pos1 <= length_encseq/2 && pos2 > length_encseq/2)
+  /* check if pos1 is lower pos2 */
+  if(pos1 > pos2)
   {
-    diffstrands = true;
+    tmp = pos1;
+    pos1 = pos2;
+    pos2 = tmp;
   }
   
-  /* same contig */
+  /* same contig and different strands */
+  num_of_contigs = gt_encseq_num_of_sequences(encseq);
+  
   seqnum1 = gt_encseq_seqnum(encseq, pos1);
   seqnum2 = gt_encseq_seqnum(encseq, pos2);
   
-  if(seqnum1 == seqnum2)
+  if(seqnum2 == num_of_contigs - seqnum1 -1)
   {
-    samecontig = true;
     contignumber = seqnum1;
+    samecontig = true;
+    diffstrands = true;
   }
   
-  /* calculate offset */
-  offset = length_encseq - pos2 - pos1 + 1;
+  /* offset is the distance between the first position of the seed on the 
+  5'3'-strand and the first position of the seed on the 3'5'-strand */
+  
+  contig_length = gt_encseq_seqlength(encseq, seqnum1);
+  startpos_contig1 = gt_encseq_seqstartpos(encseq, seqnum1);
+  startpos_contig2 = gt_encseq_seqstartpos(encseq, seqnum2);
+  
+  offset_pos1 = pos1 - startpos_contig1;
+  offset_pos2 = pos2 - startpos_contig2;
+  offset_pos2 = offset_pos2 + len -1;
+  offset_pos2 = contig_length - offset_pos2 -1;
+  
+  if(offset_pos1 < offset_pos2)
+  {
+    offset = offset_pos2 - offset_pos1;
+    direction = true;
+  }
   
   /* like this, cause we want to have other constraints later */
-  if (samecontig && diffstrands)
+  if (samecontig && diffstrands && direction)
   {
     Seed *nextfreeseedpointer;
     
-    //TODO was bedeutet die 10??
     GT_GETNEXTFREEINARRAY(nextfreeseedpointer, seeds,
                        Seed, 10);
     
@@ -118,11 +143,10 @@ static int gt_store_seeds(void *info,
 /*
  * saves the next node of the annotation graph in gn
  */
-static int gt_tir_stream_next(GT_UNUSED GtNodeStream *ns,
+static int gt_tir_stream_next(GtNodeStream *ns,
                               GT_UNUSED GtGenomeNode **gn,
                               GtError *err)
 {
-  // TODO magic has to be understood
   GtTIRStream *tir_stream;
   int had_err = 0;
   int seedcount;
@@ -169,7 +193,11 @@ static int gt_tir_stream_next(GT_UNUSED GtNodeStream *ns,
  */
 static void gt_tir_stream_free(GtNodeStream *ns)
 {
-  GtTIRStream *tir_stream = gt_node_stream_cast(gt_tir_stream_class() , ns);
+  GtTIRStream *tir_stream = gt_node_stream_cast(gt_tir_stream_class(), ns);
+  
+  // gt_str_delete damit Referenzcounter erniedrigt wird (str_indexname)
+  
+  gt_str_delete(tir_stream->str_indexname);
   
   if (tir_stream->ssar != NULL)
     gt_freeSequentialsuffixarrayreader(&tir_stream->ssar);
@@ -199,7 +227,7 @@ GtNodeStream* gt_tir_stream_new(GtStr *str_indexname,
   int had_err = 0;
   GtNodeStream *ns = gt_node_stream_create(gt_tir_stream_class(), false);
   GtTIRStream *tir_stream = gt_node_stream_cast(gt_tir_stream_class(), ns);
-  tir_stream->str_indexname = str_indexname;
+  tir_stream->str_indexname = gt_str_ref(str_indexname);  // gt_str_ref damit auch der Referenzcounter erhoeht wird
   tir_stream->minseedlength = minseedlength;
   tir_stream->state = GT_TIR_STREAM_STATE_START;
   tir_stream->ssar = 
@@ -223,6 +251,6 @@ GtNodeStream* gt_tir_stream_new(GtStr *str_indexname,
     return ns;
   }
   
-  // TODO
+  // TODO ueberlegen, ob had_err benutzt werden müsste
   return NULL;
 }
