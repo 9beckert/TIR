@@ -47,10 +47,10 @@ GT_DECLAREARRAYSTRUCT(Seed);
 typedef struct
 {
   unsigned long contignumber,
-                leading_tir_start,  /* first position of TIR on leading strand */
-                leading_tir_end,    /* last position of TIR on leading strand */
-                lagging_tir_start,  /* first position of TIR on lagging strand */
-                lagging_tir_end;    /* last position of TIR on lagging strand */
+                left_tir_start,  /* first position of TIR on forward strand */ 
+                left_tir_end,    /* last position of TIR on forward strand */   // TODO sollten sich auf den nicht gespiegelten teil  beziehen!!!
+                right_tir_start,  /* first position of TIR on reverse strand */  // dafür gibts ein makro: GT_REVERSEPOS(gesamtlänge,position)
+                right_tir_end;    /* last position of TIR on reverse strand */
   double        similarity;         /* similarity of the two TIRs */
 } TIRPair;
 
@@ -100,8 +100,7 @@ static int gt_store_seeds(void *info,
   unsigned long startpos_contig1;
   unsigned long startpos_contig2;
   unsigned long tmp = 0;
-  bool samecontig = false;
-  bool diffstrands = false;
+  bool samecontig_and_diffstrands = false;
   bool direction = false;
   GtArraySeed *seeds = (GtArraySeed *) info;
 
@@ -124,8 +123,7 @@ static int gt_store_seeds(void *info,
   if(seqnum2 == num_of_contigs - seqnum1 -1)
   {
     contignumber = seqnum1;
-    samecontig = true;
-    diffstrands = true;
+    samecontig_and_diffstrands = true;
   }
   
   /* offset is the distance between the first position of the seed on the 
@@ -146,8 +144,10 @@ static int gt_store_seeds(void *info,
     direction = true;
   }
   
+
+  
   /* like this, cause we want to have other constraints later */
-  if (samecontig && diffstrands && direction)
+  if (samecontig_and_diffstrands && direction)
   {
     Seed *nextfreeseedpointer;
     
@@ -159,6 +159,12 @@ static int gt_store_seeds(void *info,
     nextfreeseedpointer->offset = offset;
     nextfreeseedpointer->len = len;
     nextfreeseedpointer->contignumber = contignumber;
+    
+    printf("Seeds found:\n");
+    printf("pos1: %lu\n", pos1);
+    printf("pos2: %lu\n", pos2);
+    printf("len: %lu\n", len);
+    printf("offset: %lu\n\n", offset);
   }
   return 0;
 }
@@ -177,12 +183,12 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
   Myxdropbest xdropbest_right;
   //unsigned long alignment_length = 0,
   unsigned long total_length = 0,
-                leading_tir_length = 0, 
-                lagging_tir_length = 0,
-                max_lead_length = 0,    /* maximal length of leading TIR*/ 
-                max_lag_length = 0;
-  GtUchar *leading_tir_char = NULL,        /* next character to align */
-          *lagging_tir_char = NULL;
+                left_tir_length = 0, 
+                right_tir_length = 0,
+                max_left_length = 0,    /* maximal length of left TIR*/ 
+                max_right_length = 0;
+  GtUchar *left_tir_char = NULL,        /* next character to align */
+          *right_tir_char = NULL;
   unsigned long edist = 0;              /* edit distance */
   Seed *seedptr;
   TIRPair *pair;
@@ -212,7 +218,15 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
                                (int) seedptr->pos1,
                                (int) seedptr->pos2,
                                (Xdropscore)tir_stream->xdrop_belowscore);
+                               
+    /* Re-Initialize fronts */
     GT_FREEARRAY (&fronts, Myfrontvalue);
+    GT_INITARRAY (&fronts, Myfrontvalue);
+
+    
+    
+    /* init total_length */
+    total_length = gt_encseq_total_length(encseq);
     
     /* Right alignment */
     gt_evalxdroparbitscoresright(&tir_stream->arbitscores,
@@ -231,53 +245,62 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
     
     /* Store positions for the found TIR */
     pair->contignumber = seedptr->contignumber;
-    pair->leading_tir_start = seedptr->pos1 - xdropbest_left.ivalue;
-    pair->leading_tir_end = seedptr->pos1 + seedptr->len - 1 + xdropbest_right.ivalue;
-    pair->lagging_tir_start = seedptr->pos2 - xdropbest_left.jvalue;
-    pair->lagging_tir_end = seedptr->pos2 + seedptr->len - 1 + xdropbest_right.jvalue;
+    pair->left_tir_start = seedptr->pos1 - xdropbest_left.ivalue;
+    pair->left_tir_end = seedptr->pos1 + seedptr->len - 1 + xdropbest_right.ivalue;
+    
+    // Wir wollen die tatsächlichen Positionen (dh nicht auf mirrored bezogen)
+    unsigned long right_tir_start = seedptr->pos2 + seedptr->len - 1 + xdropbest_right.jvalue; // end bezogen auf mirrored
+    unsigned long right_tir_end   = seedptr->pos2 - xdropbest_left.jvalue;  // start bezogen auf mirrored
+    
+    // Dafür benutzen wir GT_REVERSEPOS(gesamtlänge,position)
+    pair->right_tir_start = GT_REVERSEPOS(total_length,right_tir_start);
+    pair->right_tir_end = GT_REVERSEPOS(total_length,right_tir_end);
     pair->similarity = 0.0;
     
     /* Check similarity */
-    leading_tir_length = pair->leading_tir_end - pair->leading_tir_start + 1;
-    lagging_tir_length = pair->lagging_tir_end - pair->lagging_tir_start + 1;
+    left_tir_length = pair->left_tir_end - pair->left_tir_start + 1;
+    right_tir_length = pair->right_tir_end - pair->right_tir_start + 1;
     
     /* Realloc tir_char if length too high */
-    if(leading_tir_length > max_lead_length)
+    if(left_tir_length > max_left_length)
     {
-      max_lead_length = leading_tir_length;
-      ALLOCASSIGNSPACE(leading_tir_char, leading_tir_char, GtUchar, max_lead_length);
+      max_left_length = left_tir_length;
+      ALLOCASSIGNSPACE(left_tir_char, left_tir_char, GtUchar, max_left_length);
     }
-    if(lagging_tir_length > max_lag_length)
+    if(right_tir_length > max_right_length)
     {
-      max_lag_length = lagging_tir_length;
-      ALLOCASSIGNSPACE(lagging_tir_char, lagging_tir_char, GtUchar, max_lag_length);
+      max_right_length = right_tir_length;
+      ALLOCASSIGNSPACE(right_tir_char, right_tir_char, GtUchar, max_right_length);
     }
     
     /* Store encoded substring */
-    gt_encseq_extract_encoded(encseq, leading_tir_char,
-                                         pair->leading_tir_start,
-                                         pair->leading_tir_end);
-    gt_encseq_extract_encoded(encseq, lagging_tir_char,
-                                         pair->lagging_tir_start,
-                                         pair->lagging_tir_end);
+    gt_encseq_extract_encoded(encseq, left_tir_char,
+                                         pair->left_tir_start,
+                                         pair->left_tir_end);
+    gt_encseq_extract_encoded(encseq, right_tir_char,
+                                         pair->right_tir_start,
+                                         pair->right_tir_end);
     /* Get edit distance */
-    edist = greedyunitedist(leading_tir_char,(unsigned long) leading_tir_length, 
-                            lagging_tir_char,(unsigned long) lagging_tir_length);
+    edist = greedyunitedist(left_tir_char,(unsigned long) left_tir_length, 
+                            right_tir_char,(unsigned long) right_tir_length);
                             
     /* Determine similarity */
     pair->similarity = 100.0 * (1 - (((double) edist)/
-                      (MAX(leading_tir_length, lagging_tir_length))));
+                      (MAX(left_tir_length, right_tir_length))));
                             
     /* Discard this candidate if similarity too small */
     if(gt_double_smaller_double(pair->similarity, 
         tir_stream->similarity_threshold))                                              
     {
       tir_pairs->nextfreeTIRPair--;
-    }                        
+    }        
+
   }
   
-  FREESPACE(leading_tir_char);
-  FREESPACE(lagging_tir_char);
+  FREESPACE(left_tir_char);
+  FREESPACE(right_tir_char);
+  
+  // TODO schaun ob array zu free'n ist
   
   return had_err;
   
@@ -321,15 +344,15 @@ static int gt_tir_stream_next(GtNodeStream *ns,
   
   /* output */
   
-  printf("TIR found!!! Woohoo!\n");
+  printf("TIRs found:\n");
   for(count = 0; count < tir_stream->tir_pairs.nextfreeTIRPair; count++)
   {
-    printf("contig %lu\n, lead: start %lu, end %lu\n, lag: start %lu, end %lu\n similarity: %f\n\n", 
+    printf("contig %lu\n left: start %lu, end %lu\n right: start %lu, end %lu\n similarity: %f\n\n", 
       tir_stream->tir_pairs.spaceTIRPair[count].contignumber,
-      tir_stream->tir_pairs.spaceTIRPair[count].leading_tir_start,
-      tir_stream->tir_pairs.spaceTIRPair[count].leading_tir_end,
-      tir_stream->tir_pairs.spaceTIRPair[count].lagging_tir_start,
-      tir_stream->tir_pairs.spaceTIRPair[count].lagging_tir_end,
+      tir_stream->tir_pairs.spaceTIRPair[count].left_tir_start,
+      tir_stream->tir_pairs.spaceTIRPair[count].left_tir_end,
+      tir_stream->tir_pairs.spaceTIRPair[count].right_tir_start,
+      tir_stream->tir_pairs.spaceTIRPair[count].right_tir_end,
       tir_stream->tir_pairs.spaceTIRPair[count].similarity);
   }
   
