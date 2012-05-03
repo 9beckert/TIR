@@ -1,4 +1,5 @@
 /*
+  Copyright (c) 2012 Manuela Beckert <9beckert@informatik.uni-hamburg.de>
   Copyright (c) 2012 Dorle Osterode <9osterod@informatik.uni-hamburg.de>
   Copyright (c) 2012 Center for Bioinformatics, University of Hamburg
 
@@ -15,6 +16,9 @@
   OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
 
+/* A stream, which finds Terminal Inverted Repeats in the encoded sequence
+   and returns a pair of them with every next-call. */
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -25,6 +29,7 @@
 #include "core/str_api.h"
 #include "extended/genome_node.h"
 #include "extended/node_stream_api.h"
+#include "extended/region_node_api.h"
 #include "ltr/ltr_xdrop.h"
 #include "match/esa-maxpairs.h"
 #include "match/esa-seqread.h"
@@ -32,31 +37,33 @@
 #include "match/spacedef.h"
 #include "tools/gt_tir_stream.h"
 
-
+/* A pair of Seeds (identical inverted parts in the sequence) */
 typedef struct
 {
   unsigned long pos1;         /* position of first seed */
   unsigned long pos2;         /* position of seconf seed (other contig) */
-  unsigned long offset;       /* distance between them IRL */
-  unsigned long len;          /* length of maximal seed  */
+  unsigned long offset;       /* distance between them related to the actual sequence 
+				 (not mirrored) */
+  unsigned long len;          /* length of the seed  */
   unsigned long contignumber; /* number of contig for this seed */
 } Seed;
 
 GT_DECLAREARRAYSTRUCT(Seed);
 
+/* A pair of TIRs (extended Seeds) */
 typedef struct
 {
   unsigned long contignumber,
                 left_tir_start,  /* first position of TIR on forward strand */ 
-                left_tir_end,    /* last position of TIR on forward strand */   // TODO sollten sich auf den nicht gespiegelten teil  beziehen!!!
-                right_tir_start,  /* first position of TIR on reverse strand */  // dafür gibts ein makro: GT_REVERSEPOS(gesamtlänge,position)
-                right_tir_end;    /* last position of TIR on reverse strand */
-  double        similarity;         /* similarity of the two TIRs */
+                left_tir_end,    /* last position of TIR on forward strand */    
+                right_tir_start, /* first position of TIR on reverse strand */  
+                right_tir_end;   /* last position of TIR on reverse strand */   
+  double        similarity;      /* similarity of the two TIRs */
 } TIRPair;
 
 GT_DECLAREARRAYSTRUCT(TIRPair);
 
-
+/* currently not really in use */
 typedef enum {
   GT_TIR_STREAM_STATE_START,
   GT_TIR_STREAM_STATE_REGIONS,
@@ -64,23 +71,28 @@ typedef enum {
   GT_TIR_STREAM_STATE_FEATURES
 } GtTIRStreamState;
 
+/* The arguments */
 struct GtTIRStream
 {
-  const GtNodeStream parent_instance;
-  GtStr *str_indexname;
-  unsigned long minseedlength;
-  const GtEncseq *encseq;
-  Sequentialsuffixarrayreader *ssar;
-  GtArraySeed seedarray;
-  GtTIRStreamState state;
-  GtArrayTIRPair tir_pairs;
-  Arbitraryscores arbitscores;
-  int xdrop_belowscore;
-  double similarity_threshold;
+  const GtNodeStream parent_instance; /* node which could be before us to call next on */
+  GtStr *str_indexname;               /* index name of suffix array */
+  unsigned long minseedlength;        /* minimal seed length */
+  const GtEncseq *encseq;             /* encoded sequence */
+  Sequentialsuffixarrayreader *ssar;  /* suffix array reader */
+  GtArraySeed seedarray;              /* array containing our seeds */
+  GtTIRStreamState state;             /* current state of output */
+  GtArrayTIRPair tir_pairs;           /* array contianing our TIRs */
+  Arbitraryscores arbitscores;        /* cost of match, mismatch, insertion, deletion */
+  int xdrop_belowscore;               /* threshold for xdop algorithm when to discard extensions */
+  double similarity_threshold;        /* decides whether a TIR is accepted or not */
+  unsigned long num_of_tirs;          /* number of TIRs found */
+  unsigned long cur_elem_index;       /* index of the TIR to be put out next */
+  unsigned long prev_seqnum;          /* number of previous contig */
 };
 
 /*
- * processmaxpairs call-back-function, which stores the seeds in an array
+ * Stores the seeds in an array.
+ * (processmaxpairs call-back-function)
  */
 static int gt_store_seeds(void *info,
                           const GtEncseq *encseq,
@@ -192,7 +204,7 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
   unsigned long edist = 0;              /* edit distance */
   Seed *seedptr;
   TIRPair *pair;
-  bool had_err = false;
+  int had_err = 0;
   
   /* Did we have errors so far? */
   gt_error_check(err);
@@ -248,11 +260,11 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
     pair->left_tir_start = seedptr->pos1 - xdropbest_left.ivalue;
     pair->left_tir_end = seedptr->pos1 + seedptr->len - 1 + xdropbest_right.ivalue;
     
-    // Wir wollen die tatsächlichen Positionen (dh nicht auf mirrored bezogen)
-    unsigned long right_tir_start = seedptr->pos2 + seedptr->len - 1 + xdropbest_right.jvalue; // end bezogen auf mirrored
-    unsigned long right_tir_end   = seedptr->pos2 - xdropbest_left.jvalue;  // start bezogen auf mirrored
+    /* We want the actual positions (not mirrored) */
+    unsigned long right_tir_start = seedptr->pos2 + seedptr->len - 1 + xdropbest_right.jvalue; // end of mirrored is start of actual TIR
+    unsigned long right_tir_end   = seedptr->pos2 - xdropbest_left.jvalue;  // start of mirrored is end of actual TIR
     
-    // Dafür benutzen wir GT_REVERSEPOS(gesamtlänge,position)
+    /* We can get the corresponding position of a mirrored one with GT_REVERSEPOS(total length,position) */
     pair->right_tir_start = GT_REVERSEPOS(total_length,right_tir_start);
     pair->right_tir_end = GT_REVERSEPOS(total_length,right_tir_end); 
     pair->similarity = 0.0;
@@ -289,11 +301,16 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
     pair->similarity = 100.0 * (1 - (((double) edist)/
                       (MAX(left_tir_length, right_tir_length))));
                             
-    /* Discard this candidate if similarity too small */
+    /* Discard this candidate if similarity too small or increase number of TIRs*/
     if(gt_double_smaller_double(pair->similarity, 
         tir_stream->similarity_threshold))                                              
     {
       tir_pairs->nextfreeTIRPair--;
+
+    }
+    else
+    {
+      tir_stream->num_of_tirs++;
     }      
 
   }
@@ -309,7 +326,7 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
 
 
 /*
- * saves the next node of the annotation graph in gn
+ * Saves the next node of the annotation graph in gn.
  */
 static int gt_tir_stream_next(GtNodeStream *ns,
                               GT_UNUSED GtGenomeNode **gn,
@@ -321,7 +338,7 @@ static int gt_tir_stream_next(GtNodeStream *ns,
   gt_error_check(err);
   tir_stream = gt_node_stream_cast(gt_tir_stream_class(), ns);
   
-  /* find seeds */
+  /* generate and check seeds */
   if(tir_stream->state == GT_TIR_STREAM_STATE_START)
   {
     if (!had_err && gt_enumeratemaxpairs(tir_stream->ssar,
@@ -335,16 +352,21 @@ static int gt_tir_stream_next(GtNodeStream *ns,
       had_err = -1;
     }
     
+    /* extend seeds to TIRs and check TIRs */
     if(!had_err && gt_searchforTIRs(tir_stream, &tir_stream->tir_pairs, tir_stream->encseq, err) != 0)
     {
       had_err = -1;
     }
+
+    /* free the seed array since we don't need it any longer */
+    GT_FREEARRAY(&tir_stream->seedarray, Seed);
     
-    //tir_stream->state = GT_TIR_STREAM_STATE_REGIONS;
+    // TODO apply further filters like removing duplicates, sort elements!!!!!!
+
+    tir_stream->state = GT_TIR_STREAM_STATE_REGIONS;
   }
   
-  /* output */
-  
+  /* output on console */
   printf("TIRs found:\n");
   for(count = 0; count < tir_stream->tir_pairs.nextfreeTIRPair; count++)
   {
@@ -356,14 +378,96 @@ static int gt_tir_stream_next(GtNodeStream *ns,
       tir_stream->tir_pairs.spaceTIRPair[count].right_tir_end,
       tir_stream->tir_pairs.spaceTIRPair[count].similarity);
   }
+
+  /* stream out the region nodes */
+  if (!had_err && tir_stream->state == GT_TIR_STREAM_STATE_REGIONS) 
+  {
+    // TODO Nachfragen: warum wird nicht alles auf einmal gesendet,
+    // wenn der state am ende immer auf den nachfolger gesetzt wird?
+
+    bool skip = false;
+
+    /* check whether index is valid */
+    if(tir_stream->cur_elem_index < tir_stream->num_of_tirs)
+    {
+      unsigned long seqnum, seqlength;
+      GtGenomeNode *rn;
+      GtStr *seqid;
+      seqnum = tir_stream->tir_pairs[tir_stream->cur_elem_index]->contignumber;
+
+      /* if first time we do this */
+      if(tir_stream->prev_seqnum == GT_UNDEF_ULONG)
+      {
+        /* use current seqnum */
+        tir_stream->prev_seqnum = seqnum;
+      }
+      else
+      {
+        /* else get seqnum of next contig */
+        while(tir_stream->prev_seqnum == seqnum)
+        {
+          tir_stream->cur_elem_index++;
+          
+          /* don't go on if index is out of bounds */
+          if(tir_stream->cur_elem_index >= tir_stream->num_of_tirs)
+          {
+            skip = true;
+            break;
+          }
+          
+          seqnum = tir_stream->tir_pairs[tir_stream->cur_elem_index]->contignumer;
+        }
+      }
+      
+      /* create node */
+      if(!skip)
+      {
+        tir_stream->prev_seqnum = seqnum; /* for next call of REGIONS */
+        seqlength = gt_encseq_seqlength(tir_stream->encseq, seqnum);
+        
+        /* add description */
+        seqid = gt_str_new_cstr("seq");
+        gt_str_append_ulong(seqid, seqnum);
+        rn = gt_region_node_new(seqid, 1, seqlength); // seqid, start, end
+        
+        gt_str_delete(seqid);
+        *gn = rn; // set return variable
+        tir_stream->cur_elem_index++;
+      }
+      else
+      {
+        /* we skip */
+        tir_stream->cur_elem_index = 0;
+        tir_stream->state = GT_TIR_STATE_COMMENTS;
+        *gn = NULL;
+      }
+    }
+    else
+    {
+      /* no valid index */
+      tir_stream->cur_elem_index = 0;
+      tir_stream->state = GT_TIR_STATE_COMMENTS;
+      *gn = NULL;
+    }
+  }
+
+  /* then stream out the comment nodes */
+  if (!had_err && tir_stream->state == GT_TIR_STREAM_STATE_COMMENTS) 
+  {
+    // line 1429
+  }
+
+  /* finally stream out the features */
+  if (!had_err && tir_stream->state == GT_TIR_STREAM_STATE_FEATURES)
+  {
+
+  } 
   
-  /* magic has to happen here */
-  
-  return 0;
+  return had_err;
 }
 
 /*
- * frees stuff
+ * Frees stuff.
  */
 static void gt_tir_stream_free(GtNodeStream *ns)
 {
@@ -378,7 +482,7 @@ static void gt_tir_stream_free(GtNodeStream *ns)
 }
 
 /*
- * this function is needed to create a GtNodeStream with the function gt_node_stream_create(class, bool)
+ * This function is needed to create a GtNodeStream with the function gt_node_stream_create(class, bool)
  */
 const GtNodeStreamClass* gt_tir_stream_class(void)
 {
@@ -392,7 +496,7 @@ const GtNodeStreamClass* gt_tir_stream_class(void)
 }
 
 /*
- * creates a new tir-stream
+ * Creates a new TIR-stream
  */
 GtNodeStream* gt_tir_stream_new(GtStr *str_indexname,
                                 unsigned long minseedlength,
@@ -404,11 +508,14 @@ GtNodeStream* gt_tir_stream_new(GtStr *str_indexname,
   int had_err = 0;
   GtNodeStream *ns = gt_node_stream_create(gt_tir_stream_class(), false);
   GtTIRStream *tir_stream = gt_node_stream_cast(gt_tir_stream_class(), ns);
-  tir_stream->str_indexname = gt_str_ref(str_indexname);  // gt_str_ref damit auch der Referenzcounter erhoeht wird
+  tir_stream->str_indexname = gt_str_ref(str_indexname);  /* use of gt_str_ref so the reference counter will be increased */
   tir_stream->minseedlength = minseedlength;
   tir_stream->arbitscores = arbitscores;
   tir_stream->xdrop_belowscore = xdrop_belowscore;
   tir_stream->similarity_threshold = similarity_threshold;
+  tir_stream->num_of_tirs = 0;
+  tir_stream->cur_elem_index = 0;
+  tir_stream->prev_seqnum = GT_UNDEF_ULONG;
   tir_stream->state = GT_TIR_STREAM_STATE_START;
   tir_stream->ssar = 
       gt_newSequentialsuffixarrayreaderfromfile(gt_str_get(str_indexname),

@@ -1,4 +1,5 @@
 /*
+  Copyright (c) 2012 Manuela Beckert <9beckert@informatik.uni-hamburg.de>
   Copyright (c) 2010 Dorle Osterode <9osterode@informatik.uni-hamburg.de>
   Copyright (c) 2010 Center for Bioinformatics, University of Hamburg
 
@@ -15,13 +16,16 @@
   OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
 
+/* A stream, which finds Terminal Inverted Repeats in the encoded sequence
+   and returns a pair of them with every next-call. */
+
 #ifndef GT_TIR_STREAM_H
 #define GT_TIR_STREAM_H
 
 #include "extended/node_stream_api.h"
 
 
-/* implements the ``genome stream'' interface */
+/* implements the "genome stream" interface */
 typedef struct GtTIRStream GtTIRStream;
 
 const GtNodeStreamClass* gt_tir_stream_class(void);
