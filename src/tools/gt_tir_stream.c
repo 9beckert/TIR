@@ -27,6 +27,7 @@
 #include "core/mathsupport.h"
 #include "core/minmax.h"
 #include "core/str_api.h"
+#include "core/undef_api.h"
 #include "extended/genome_node.h"
 #include "extended/node_stream_api.h"
 #include "extended/region_node_api.h"
@@ -318,8 +319,6 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
   FREESPACE(left_tir_char);
   FREESPACE(right_tir_char);
   
-  // TODO schaun ob array zu free'n ist
-  
   return had_err;
   
 }
@@ -382,8 +381,6 @@ static int gt_tir_stream_next(GtNodeStream *ns,
   /* stream out the region nodes */
   if (!had_err && tir_stream->state == GT_TIR_STREAM_STATE_REGIONS) 
   {
-    // TODO Nachfragen: warum wird nicht alles auf einmal gesendet,
-    // wenn der state am ende immer auf den nachfolger gesetzt wird?
 
     bool skip = false;
 
@@ -393,7 +390,7 @@ static int gt_tir_stream_next(GtNodeStream *ns,
       unsigned long seqnum, seqlength;
       GtGenomeNode *rn;
       GtStr *seqid;
-      seqnum = tir_stream->tir_pairs[tir_stream->cur_elem_index]->contignumber;
+      seqnum = tir_stream->tir_pairs.spaceTIRPair[tir_stream->cur_elem_index].contignumber;
 
       /* if first time we do this */
       if(tir_stream->prev_seqnum == GT_UNDEF_ULONG)
@@ -415,7 +412,7 @@ static int gt_tir_stream_next(GtNodeStream *ns,
             break;
           }
           
-          seqnum = tir_stream->tir_pairs[tir_stream->cur_elem_index]->contignumer;
+          seqnum = tir_stream->tir_pairs.spaceTIRPair[tir_stream->cur_elem_index].contignumber;
         }
       }
       
@@ -438,7 +435,7 @@ static int gt_tir_stream_next(GtNodeStream *ns,
       {
         /* we skip */
         tir_stream->cur_elem_index = 0;
-        tir_stream->state = GT_TIR_STATE_COMMENTS;
+        tir_stream->state = GT_TIR_STREAM_STATE_COMMENTS;
         *gn = NULL;
       }
     }
@@ -446,7 +443,7 @@ static int gt_tir_stream_next(GtNodeStream *ns,
     {
       /* no valid index */
       tir_stream->cur_elem_index = 0;
-      tir_stream->state = GT_TIR_STATE_COMMENTS;
+      tir_stream->state = GT_TIR_STREAM_STATE_COMMENTS;
       *gn = NULL;
     }
   }
@@ -454,7 +451,71 @@ static int gt_tir_stream_next(GtNodeStream *ns,
   /* then stream out the comment nodes */
   if (!had_err && tir_stream->state == GT_TIR_STREAM_STATE_COMMENTS) 
   {
-    // line 1429
+    bool skip = false;
+    if (tir_stream->cur_elem_index < tir_stream->num_of_tirs)
+    {
+      const char *description;
+      unsigned long description_len, seqnum;
+      GtGenomeNode *cn;
+      
+      seqnum = tir_stream->tir_pairs.spaceTIRPair[tir_stream->cur_elem_index].contignumber;
+      
+      /* for the first time */
+      if(tir_stream->prev_seqnum == GT_UNDEF_LONG)
+      {
+        /* use current seqnum */
+        tir_stream->prev_seqnum = seqnum;
+      }
+      else
+      {
+        /* else get seqnum of next contig */
+        while(tir_stream->prev_seqnum == seqnum)
+        {
+          tir_stream->cur_elem_index++;
+          if(tir_stream->cur_elem_index >= tir_stream->num_of_tirs)
+          {
+            skip = true;
+            break;
+          }
+        }
+        
+        seqnum = tir_stream->tir_pairs.spaceTIRPair[tir_stream->cur_elem_index].contignumber;
+      }
+      
+      /* create a new comment node */
+      if(!skip)
+      {
+        tir_stream->prev_seqnum = seqnum;
+        
+        /* get description and descriptionlength of current contig */
+        description = gt_encseq_description(tir_stream->encseq, &description_len, seqnum);
+       
+       /* make a \0 terminated string of description */ 
+      char description_string[description_len + 1];
+      (void) strncpy(description_string, description, (size_t) (description_len * sizeof(char)));
+      description_string[description_len] = '\0';
+      
+      /* make a new comment node */
+      cn = gt_comment_node_new(description_string);
+      
+      *gn = cn;
+      tir_stream->cur_elem_index++;
+      }
+      else
+      {
+        /* skip */
+        tir_stream->cur_elem_index = 0;
+        tir_stream->state = GT_TIR_STREAM_STATE_FEATURES;
+        *gn = NULL;
+      }
+    }
+    else
+    {
+      /* no valid index */
+      tir_stream->cur_elem_index = 0;
+      tir_stream->state = GT_TIR_STREAM_STATE_FEATURES;
+      *gn = NULL;
+    }
   }
 
   /* finally stream out the features */
