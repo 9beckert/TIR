@@ -254,7 +254,7 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
     
     // Dafür benutzen wir GT_REVERSEPOS(gesamtlänge,position)
     pair->right_tir_start = GT_REVERSEPOS(total_length,right_tir_start);
-    pair->right_tir_end = GT_REVERSEPOS(total_length,right_tir_end);
+    pair->right_tir_end = GT_REVERSEPOS(total_length,right_tir_end); 
     pair->similarity = 0.0;
     
     /* Check similarity */
@@ -278,8 +278,9 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
                                          pair->left_tir_start,
                                          pair->left_tir_end);
     gt_encseq_extract_encoded(encseq, right_tir_char,
-                                         pair->right_tir_start,
-                                         pair->right_tir_end);
+                                         right_tir_end,
+                                         right_tir_start);
+    
     /* Get edit distance */
     edist = greedyunitedist(left_tir_char,(unsigned long) left_tir_length, 
                             right_tir_char,(unsigned long) right_tir_length);
@@ -293,7 +294,7 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
         tir_stream->similarity_threshold))                                              
     {
       tir_pairs->nextfreeTIRPair--;
-    }        
+    }      
 
   }
   
