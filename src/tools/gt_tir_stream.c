@@ -216,7 +216,7 @@ static void gt_swap_TIRs(GtArrayTIRPair *tir_pairs, unsigned long pos1, unsigned
 /* sorts an array of tirs with inplace quicksort*/
 static void gt_sort_TIRs(GtArrayTIRPair *tir_pairs,unsigned long start, unsigned long end)
 {
-  TIRPair pivot;
+  TIRPair pivot;  
   unsigned long l;
   unsigned long r;
   
@@ -254,6 +254,7 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
                              const GtEncseq *encseq,
                              GtError *err)
 {
+  int count;
   unsigned long seedcounter = 0;
   GtArrayMyfrontvalue fronts; /* needed to use xdrop */
   Myxdropbest xdropbest_left; /* return parameters for xdrop */
@@ -386,6 +387,20 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
   /* sort the tir_pairs */
   gt_sort_TIRs(tir_pairs, 0, tir_stream->num_of_tirs);
   
+    
+  /* output on console */
+  printf("TIRs found:\n");
+  for(count = 0; count < tir_stream->tir_pairs.nextfreeTIRPair; count++)
+  {
+    printf("contig %lu\n left: start %lu, end %lu\n right: start %lu, end %lu\n similarity: %f\n\n", 
+      tir_stream->tir_pairs.spaceTIRPair[count].contignumber,
+      tir_stream->tir_pairs.spaceTIRPair[count].left_tir_start,
+      tir_stream->tir_pairs.spaceTIRPair[count].left_tir_end,
+      tir_stream->tir_pairs.spaceTIRPair[count].right_tir_start,
+      tir_stream->tir_pairs.spaceTIRPair[count].right_tir_end,
+      tir_stream->tir_pairs.spaceTIRPair[count].similarity);
+  }
+  
   return had_err;
   
 }
@@ -400,7 +415,6 @@ static int gt_tir_stream_next(GtNodeStream *ns,
 {
   GtTIRStream *tir_stream;
   int had_err = 0;
-  //int count;
   gt_error_check(err);
   tir_stream = gt_node_stream_cast(gt_tir_stream_class(), ns);
   
@@ -427,23 +441,10 @@ static int gt_tir_stream_next(GtNodeStream *ns,
     /* free the seed array since we don't need it any longer */
     GT_FREEARRAY(&tir_stream->seedarray, Seed);
     
-    // TODO apply further filters like removing duplicates, sort elements!!!!!!
+    // TODO apply further filters like removing duplicates ? do we need that?
 
     tir_stream->state = GT_TIR_STREAM_STATE_REGIONS;
   }
-  
-  /* output on console */
-  /*printf("TIRs found:\n");
-  for(count = 0; count < tir_stream->tir_pairs.nextfreeTIRPair; count++)
-  {
-    printf("contig %lu\n left: start %lu, end %lu\n right: start %lu, end %lu\n similarity: %f\n\n", 
-      tir_stream->tir_pairs.spaceTIRPair[count].contignumber,
-      tir_stream->tir_pairs.spaceTIRPair[count].left_tir_start,
-      tir_stream->tir_pairs.spaceTIRPair[count].left_tir_end,
-      tir_stream->tir_pairs.spaceTIRPair[count].right_tir_start,
-      tir_stream->tir_pairs.spaceTIRPair[count].right_tir_end,
-      tir_stream->tir_pairs.spaceTIRPair[count].similarity);
-  }*/
 
   /* stream out the region nodes */
   if (!had_err && tir_stream->state == GT_TIR_STREAM_STATE_REGIONS) 
@@ -604,17 +605,38 @@ static int gt_tir_stream_next(GtNodeStream *ns,
       /* features */
       /* repeat region */
       /* make the parent node */
-      node = gt_feature_node_new(seqid, "repeat region", pair->left_tir_start - seqstartpos + 1, pair->right_tir_start - seqstartpos + 1, GT_STRAND_UNKNOWN);
+      node = gt_feature_node_new(seqid, "repeat_region", pair->left_tir_start - seqstartpos + 1, pair->right_tir_end - seqstartpos + 1, GT_STRAND_UNKNOWN);
       
       /* set stuff */
-      //TODO woher kommt gt_feature_nodes_set_source funktion?
-      //gt_feature_nodes_set_source((GtFeatureNode*) node, source);
+      gt_feature_node_set_source((GtFeatureNode*) node, source);
       *gn = node;
       parent = node;
+
+      /* target site duplication */
       
-      /*  */
+      // TODO child of region
       
-      //TODO alle anderen features müssen noch implementiert 
+      
+      /* terminal inverted repeat element */
+      
+      node = gt_feature_node_new(seqid, "terminal_inverted_repeat_element", pair->left_tir_start - seqstartpos + 1, pair->right_tir_end - seqstartpos +1, GT_STRAND_UNKNOWN);
+      gt_feature_node_set_source((GtFeatureNode*)node, source);
+      gt_feature_node_add_child((GtFeatureNode*)parent, (GtFeatureNode*)node);
+      parent = node;
+      
+      /* left terminal inverted repeat */
+
+      node = gt_feature_node_new(seqid, "terminal_inverted_repeat", pair->left_tir_start - seqstartpos + 1, pair->left_tir_end - seqstartpos + 1, GT_STRAND_UNKNOWN);
+      gt_feature_node_set_source((GtFeatureNode*)node, source);
+      gt_feature_node_add_child((GtFeatureNode*)parent, (GtFeatureNode*)node);
+      
+      
+      /* right terminal inverted repeat */
+      
+      node = gt_feature_node_new(seqid, "terminal_inverted_repeat", pair->right_tir_start - seqstartpos + 1, pair->right_tir_end - seqstartpos + 1, GT_STRAND_UNKNOWN);
+      gt_feature_node_set_source((GtFeatureNode*)node, source);
+      gt_feature_node_add_child((GtFeatureNode*)parent, (GtFeatureNode*)node);
+          
       
       /* clean up and get next pair */
       gt_str_delete(seqid);

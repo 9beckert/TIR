@@ -23,6 +23,7 @@
 
 #include "core/ma.h"
 #include "core/unused_api.h"
+#include "extended/gff3_out_stream_api.h"
 #include "ltr/ltr_xdrop.h"
 #include "tools/gt_tir.h"
 #include "tools/gt_tir_stream.h"
@@ -34,6 +35,7 @@ typedef struct {
   Arbitraryscores arbitscores;
   int xdrop_belowscore;
   double similarity_threshold;
+  GtStr *str_gff3filename;
 } GtTirArguments;
 
 /*
@@ -43,6 +45,7 @@ static void* gt_tir_arguments_new(void)
 {
   GtTirArguments *arguments = gt_calloc(1, sizeof *arguments);
   arguments->str_indexname = gt_str_new();
+  arguments->str_gff3filename = gt_str_new();
   return arguments;
 }
 
@@ -71,7 +74,8 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
            *optionins,
            *optiondel,
            *optionxdrop,  /* xdropbelowscore for extension alignment */
-           *optionsimilar;/* similarity threshold */
+           *optionsimilar,/* similarity threshold */
+           *optiongff3;   /* gff3file for output */
   
   gt_assert(arguments);
 
@@ -150,6 +154,13 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
                                (double) 0.0,
                                100.0);
   gt_option_parser_add_option(op, optionsimilar);
+  
+  /* -gff3 */
+  optiongff3 = gt_option_new_string("gff3",
+                                    "specify GFF3 outputfilename",
+                                    arguments->str_gff3filename, NULL);
+  //gt_option_is_mandatory(optiongff3);
+  gt_option_parser_add_option(op, optiongff3);
 
   return op;
 }
@@ -198,8 +209,11 @@ static int gt_tir_runner(int argc, const char **argv,
   void *tool_arguments,   // argument struct
   GtError *err) // error messages
 {
+ // GtFile *gff3file = NULL;
   GtTirArguments *arguments = tool_arguments;
-  GtNodeStream *tir_stream;
+  GtNodeStream *tir_stream = NULL,
+               *gff3_out_stream = NULL,
+               *last_stream = NULL;
   int had_err = 0;
 
   gt_error_check(err);
@@ -217,6 +231,21 @@ static int gt_tir_runner(int argc, const char **argv,
   {
     return -1;
   }
+  
+  last_stream = tir_stream;
+  
+  /* gff3 out stream */
+  
+  /*gff3file = gt_file_open(GT_FILE_MODE_UNCOMPRESSED,
+                          gt_str_get(arguments->str_gff3filename),
+                          "w+",
+                          err);
+  if (gff3file == NULL) 
+  {
+    had_err = -1;
+  } */
+    gff3_out_stream = gt_gff3_out_stream_new(last_stream, NULL);
+    last_stream = gff3_out_stream;
   
   /* output arguments line */
   gt_tir_showargsline(argc, argv);
