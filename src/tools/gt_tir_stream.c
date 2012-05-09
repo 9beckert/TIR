@@ -173,13 +173,77 @@ static int gt_store_seeds(void *info,
     nextfreeseedpointer->len = len;
     nextfreeseedpointer->contignumber = contignumber;
     
-    printf("Seeds found:\n");
-    printf("pos1: %lu\n", pos1);
-    printf("pos2: %lu\n", pos2);
-    printf("len: %lu\n", len);
-    printf("offset: %lu\n\n", offset);
   }
   return 0;
+}
+
+static int gt_compare_TIRs(TIRPair *pair1, TIRPair *pair2)
+{
+  if(pair1->contignumber < pair2->contignumber)
+  {
+    return -1;
+  }
+  else if(pair1->contignumber == pair2->contignumber)
+  {
+    if(pair1->left_tir_start < pair2->left_tir_start)
+    {
+      return -1;
+    }
+    else if(pair1->left_tir_start == pair2-> left_tir_start)
+    {
+      if(pair1->right_tir_start < pair2->right_tir_start)
+      {
+        return -1;
+      }
+      else if(pair1->right_tir_start == pair2->right_tir_start)
+      {
+        return 0;
+      }
+    }
+  }
+  return 1;
+}
+
+/* swaps the elements at pos1 and pos2 in tir_pairs */
+static void gt_swap_TIRs(GtArrayTIRPair *tir_pairs, unsigned long pos1, unsigned long pos2)
+{
+  TIRPair tmp;
+  tmp = tir_pairs->spaceTIRPair[pos1];
+  tir_pairs->spaceTIRPair[pos1] = tir_pairs->spaceTIRPair[pos2];
+  tir_pairs->spaceTIRPair[pos2] = tmp;
+}
+
+/* sorts an array of tirs with inplace quicksort*/
+static void gt_sort_TIRs(GtArrayTIRPair *tir_pairs,unsigned long start, unsigned long end)
+{
+  TIRPair pivot;
+  unsigned long l;
+  unsigned long r;
+  
+  if(end > start)
+  {
+    pivot = tir_pairs->spaceTIRPair[start];
+    l = start + 1;
+    r = end;
+    while(l < r)
+    {
+      if(gt_compare_TIRs(&tir_pairs->spaceTIRPair[l], &pivot) <= 0)
+      {
+        l++;
+      }
+      else
+      {
+        r--;
+        gt_swap_TIRs(tir_pairs, l, r);
+      }
+    }
+    l--;
+    gt_swap_TIRs(tir_pairs, start, l);
+    gt_sort_TIRs(tir_pairs, start, l);
+    gt_sort_TIRs(tir_pairs, r, end);
+    
+  }
+  
 }
 
 /*
@@ -319,6 +383,9 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
   FREESPACE(left_tir_char);
   FREESPACE(right_tir_char);
   
+  /* sort the tir_pairs */
+  gt_sort_TIRs(tir_pairs, 0, tir_stream->num_of_tirs);
+  
   return had_err;
   
 }
@@ -333,7 +400,7 @@ static int gt_tir_stream_next(GtNodeStream *ns,
 {
   GtTIRStream *tir_stream;
   int had_err = 0;
-  int count;
+  //int count;
   gt_error_check(err);
   tir_stream = gt_node_stream_cast(gt_tir_stream_class(), ns);
   
@@ -366,7 +433,7 @@ static int gt_tir_stream_next(GtNodeStream *ns,
   }
   
   /* output on console */
-  printf("TIRs found:\n");
+  /*printf("TIRs found:\n");
   for(count = 0; count < tir_stream->tir_pairs.nextfreeTIRPair; count++)
   {
     printf("contig %lu\n left: start %lu, end %lu\n right: start %lu, end %lu\n similarity: %f\n\n", 
@@ -376,7 +443,7 @@ static int gt_tir_stream_next(GtNodeStream *ns,
       tir_stream->tir_pairs.spaceTIRPair[count].right_tir_start,
       tir_stream->tir_pairs.spaceTIRPair[count].right_tir_end,
       tir_stream->tir_pairs.spaceTIRPair[count].similarity);
-  }
+  }*/
 
   /* stream out the region nodes */
   if (!had_err && tir_stream->state == GT_TIR_STREAM_STATE_REGIONS) 
@@ -455,6 +522,7 @@ static int gt_tir_stream_next(GtNodeStream *ns,
     if (tir_stream->cur_elem_index < tir_stream->num_of_tirs)
     {
       const char *description;
+      char description_string[BUFSIZ];
       unsigned long description_len, seqnum;
       GtGenomeNode *cn;
       
@@ -491,7 +559,6 @@ static int gt_tir_stream_next(GtNodeStream *ns,
         description = gt_encseq_description(tir_stream->encseq, &description_len, seqnum);
        
        /* make a \0 terminated string of description */ 
-      char description_string[description_len + 1];
       (void) strncpy(description_string, description, (size_t) (description_len * sizeof(char)));
       description_string[description_len] = '\0';
       
@@ -521,7 +588,43 @@ static int gt_tir_stream_next(GtNodeStream *ns,
   /* finally stream out the features */
   if (!had_err && tir_stream->state == GT_TIR_STREAM_STATE_FEATURES)
   {
-
+    if(tir_stream->cur_elem_index < tir_stream->num_of_tirs)
+    {
+      GtStr *seqid, *source;
+      GtGenomeNode *node, *parent;
+      const TIRPair *pair = &tir_stream->tir_pairs.spaceTIRPair[tir_stream->cur_elem_index];
+      unsigned long seqstartpos;
+      
+      seqstartpos = gt_encseq_seqstartpos(tir_stream->encseq, pair->contignumber);
+      seqid = gt_str_new_cstr("seq");
+      source = gt_str_new_cstr("TIR");
+      
+      gt_str_append_ulong(seqid, pair->contignumber);
+      
+      /* features */
+      /* repeat region */
+      /* make the parent node */
+      node = gt_feature_node_new(seqid, "repeat region", pair->left_tir_start - seqstartpos + 1, pair->right_tir_start - seqstartpos + 1, GT_STRAND_UNKNOWN);
+      
+      /* set stuff */
+      //TODO woher kommt gt_feature_nodes_set_source funktion?
+      //gt_feature_nodes_set_source((GtFeatureNode*) node, source);
+      *gn = node;
+      parent = node;
+      
+      /*  */
+      
+      //TODO alle anderen features müssen noch implementiert 
+      
+      /* clean up and get next pair */
+      gt_str_delete(seqid);
+      gt_str_delete(source);
+      tir_stream->cur_elem_index++;
+    }
+    else
+    {
+      *gn = NULL;
+    }
   } 
   
   return had_err;
