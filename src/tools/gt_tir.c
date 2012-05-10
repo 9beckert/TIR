@@ -35,7 +35,6 @@ typedef struct {
   Arbitraryscores arbitscores;
   int xdrop_belowscore;
   double similarity_threshold;
-  GtStr *str_gff3filename;
 } GtTirArguments;
 
 /*
@@ -45,7 +44,6 @@ static void* gt_tir_arguments_new(void)
 {
   GtTirArguments *arguments = gt_calloc(1, sizeof *arguments);
   arguments->str_indexname = gt_str_new();
-  arguments->str_gff3filename = gt_str_new();
   return arguments;
 }
 
@@ -74,8 +72,8 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
            *optionins,
            *optiondel,
            *optionxdrop,  /* xdropbelowscore for extension alignment */
-           *optionsimilar,/* similarity threshold */
-           *optiongff3;   /* gff3file for output */
+           *optionsimilar;/* similarity threshold */
+           //*optiongff3;   /* gff3file for output */
   
   gt_assert(arguments);
 
@@ -156,11 +154,11 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   gt_option_parser_add_option(op, optionsimilar);
   
   /* -gff3 */
-  optiongff3 = gt_option_new_string("gff3",
+ /* optiongff3 = gt_option_new_string("gff3",
                                     "specify GFF3 outputfilename",
                                     arguments->str_gff3filename, NULL);
   //gt_option_is_mandatory(optiongff3);
-  gt_option_parser_add_option(op, optiongff3);
+  gt_option_parser_add_option(op, optiongff3);*/
 
   return op;
 }
@@ -252,10 +250,11 @@ static int gt_tir_runner(int argc, const char **argv,
   
   /* pull the features through the stream and free them afterwards */
   if (!had_err)
-    had_err = gt_node_stream_pull(tir_stream, err);
+    had_err = gt_node_stream_pull(last_stream, err);
     
   /* free */
   gt_node_stream_delete(tir_stream);
+  gt_node_stream_delete(gff3_out_stream);
 
   return had_err;
 }
