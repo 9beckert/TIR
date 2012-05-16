@@ -77,22 +77,34 @@ typedef enum {
 /* The arguments */
 struct GtTIRStream
 {
-  const GtNodeStream parent_instance; /* node which could be before us to call next on */
-  GtStr *str_indexname;               /* index name of suffix array */
-  unsigned long minseedlength;        /* minimal seed length */
-  const GtEncseq *encseq;             /* encoded sequence */
-  Sequentialsuffixarrayreader *ssar;  /* suffix array reader */
-  GtArraySeed seedarray;              /* array containing our seeds */
-  GtTIRStreamState state;             /* current state of output */
-  GtArrayTIRPair tir_pairs;           /* array contianing our TIRs */
-  Arbitraryscores arbitscores;        /* cost of match, mismatch, insertion, deletion */
-  int xdrop_belowscore;               /* threshold for xdop algorithm when to discard extensions */
-  double similarity_threshold;        /* decides whether a TIR is accepted or not */
-  unsigned long num_of_tirs;          /* number of TIRs found */
-  unsigned long cur_elem_index;       /* index of the TIR to be put out next */
-  unsigned long prev_seqnum;          /* number of previous contig */
-  bool no_overlaps;
-  bool best_overlaps;
+  /* very important stuff */
+  const GtNodeStream          parent_instance;      /* node which could be before us to call next on */  
+  const GtEncseq              *encseq;              /* encoded sequence */
+  Sequentialsuffixarrayreader *ssar;                /* suffix array reader */
+  GtArraySeed                 seedarray;            /* array containing our seeds */
+  GtArrayTIRPair              tir_pairs;            /* array contianing our TIRs */
+  GtTIRStreamState            state;                /* current state of output */  
+  
+  unsigned long               num_of_tirs,          /* number of TIRs found */
+                              cur_elem_index,       /* index of the TIR to be put out next */
+                              prev_seqnum;          /* number of previous contig */
+  
+  /* options */
+  GtStr                       *str_indexname;       /* index name of suffix array */  
+  unsigned long               min_seed_length,      /* minimal seed length */  
+                              min_TIR_length,       /* minimal length of TIR */
+                              max_TIR_length,       /* maximal length of TIR */
+                              min_TIR_distance,     /* minimal distance of TIRs */
+                              max_TIR_distance;     /* maximal distance of TIRs */
+  Arbitraryscores             arbit_scores;         /* cost of match, mismatch, insertion, deletion */
+  int                         xdrop_belowscore;     /* threshold for xdop algorithm when to discard extensions */
+  double                      similarity_threshold; /* decides whether a TIR is accepted or not */
+  bool                        no_overlaps;          /* if true all overlaps will be deleted */
+  bool                        best_overlaps;        /* if nooverlaps false and this true, of overlapping TIRs 
+                                                       only the one with best similary will remain */
+  unsigned long               min_TSD_length,       /* minimal length of TSD TODO */
+                              max_TSD_length,       /* maxlimal length of TSD TODO */
+                              vicinity;             /* vicinity to be searched for TSDs TODO */
 };
 
 /*
@@ -361,7 +373,8 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
                 left_tir_length = 0, 
                 right_tir_length = 0,
                 max_left_length = 0,    /* maximal length of left TIR*/ 
-                max_right_length = 0;
+                max_right_length = 0,
+                distance = 0;
   GtUchar *left_tir_char = NULL,        /* next character to align */
           *right_tir_char = NULL;
   unsigned long edist = 0;              /* edit distance */
@@ -383,7 +396,7 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
     GT_INITARRAY (&fronts, Myfrontvalue);
     
     /* Left alignment */
-    gt_evalxdroparbitscoresleft(&tir_stream->arbitscores,
+    gt_evalxdroparbitscoresleft(&tir_stream->arbit_scores,
                                &xdropbest_left,
                                &fronts,
                                encseq,
@@ -404,7 +417,7 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
     total_length = gt_encseq_total_length(encseq);
     
     /* Right alignment */
-    gt_evalxdroparbitscoresright(&tir_stream->arbitscores,
+    gt_evalxdroparbitscoresright(&tir_stream->arbit_scores,
                                 &xdropbest_right,
                                 &fronts,
                                 encseq,
@@ -433,9 +446,10 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
     pair->similarity = 0.0;
     pair->skip = false;
     
-    /* Check similarity */
+    /* Calculate TIR lengths and distance*/
     left_tir_length = pair->left_tir_end - pair->left_tir_start + 1;
     right_tir_length = pair->right_tir_end - pair->right_tir_start + 1;
+    distance = pair->right_tir_start - pair->left_tir_start;
     
     /* Realloc tir_char if length too high */
     if(left_tir_length > max_left_length)
@@ -464,9 +478,23 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
     /* Determine similarity */
     pair->similarity = 100.0 * (1 - (((double) edist)/
                       (MAX(left_tir_length, right_tir_length))));
-                            
-    /* Discard this candidate if similarity too small or increase number of TIRs*/
-    if(gt_double_smaller_double(pair->similarity, 
+                      
+    /* Discard this candidate if lengths constrains not satisfied */
+    if(left_tir_length > tir_stream->max_TIR_length ||
+       right_tir_length > tir_stream->max_TIR_length ||
+       left_tir_length < tir_stream->min_TIR_length ||
+       right_tir_length < tir_stream->min_TIR_length)
+    {
+      tir_pairs->nextfreeTIRPair--;
+    }    
+    /* or if distance constraints not satisfies */
+    else if(distance > tir_stream->max_TIR_distance ||
+            distance < tir_stream->min_TIR_distance)
+    {
+      tir_pairs->nextfreeTIRPair--;
+    }                   
+    /* or if similarity too small or increase number of TIRs*/
+    else if(gt_double_smaller_double(pair->similarity, 
         tir_stream->similarity_threshold))                                              
     {
       tir_pairs->nextfreeTIRPair--;
@@ -520,6 +548,7 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
 
 /*
  * Saves the next node of the annotation graph in gn.
+ * Search for Seeds here.
  */
 static int gt_tir_stream_next(GtNodeStream *ns,
                               GT_UNUSED GtGenomeNode **gn,
@@ -536,7 +565,7 @@ static int gt_tir_stream_next(GtNodeStream *ns,
     if (!had_err && gt_enumeratemaxpairs(tir_stream->ssar,
                       tir_stream->encseq,
                       gt_readmodeSequentialsuffixarrayreader(tir_stream->ssar),
-                      (unsigned int) tir_stream->minseedlength,
+                      (unsigned int) tir_stream->min_seed_length,
                       gt_store_seeds,
                       &tir_stream->seedarray,
                       err) != 0)
@@ -797,28 +826,44 @@ const GtNodeStreamClass* gt_tir_stream_class(void)
  * Creates a new TIR-stream
  */
 GtNodeStream* gt_tir_stream_new(GtStr *str_indexname,
-                                unsigned long minseedlength,
-                                Arbitraryscores arbitscores,
+                                unsigned long min_seed_length,
+                                unsigned long min_TIR_length,
+                                unsigned long max_TIR_length,
+                                unsigned long min_TIR_distance,
+                                unsigned long max_TIR_distance,
+                                Arbitraryscores arbit_scores,
                                 int xdrop_belowscore,
                                 double similarity_threshold,
                                 bool best_overlaps,
                                 bool no_overlaps,
+                                unsigned long min_TSD_length,
+                                unsigned long max_TSD_length,
+                                unsigned long vicinity,
                                 GtError *err)
 {
   int had_err = 0;
   GtNodeStream *ns = gt_node_stream_create(gt_tir_stream_class(), false);
   GtTIRStream *tir_stream = gt_node_stream_cast(gt_tir_stream_class(), ns);
-  tir_stream->str_indexname = gt_str_ref(str_indexname);  /* use of gt_str_ref so the reference counter will be increased */
-  tir_stream->minseedlength = minseedlength;
-  tir_stream->arbitscores = arbitscores;
-  tir_stream->xdrop_belowscore = xdrop_belowscore;
-  tir_stream->similarity_threshold = similarity_threshold;
   tir_stream->num_of_tirs = 0;
   tir_stream->cur_elem_index = 0;
-  tir_stream->best_overlaps = best_overlaps;
-  tir_stream->no_overlaps = no_overlaps;
   tir_stream->prev_seqnum = GT_UNDEF_ULONG;
   tir_stream->state = GT_TIR_STREAM_STATE_START;
+  
+  tir_stream->str_indexname = gt_str_ref(str_indexname);  /* use of gt_str_ref so the reference counter will be increased */
+  tir_stream->min_seed_length = min_seed_length;
+  tir_stream->min_TIR_length = min_TIR_length;
+  tir_stream->max_TIR_length = max_TIR_length;
+  tir_stream->min_TIR_distance = min_TIR_distance;
+  tir_stream->max_TIR_distance = max_TIR_distance;
+  tir_stream->arbit_scores = arbit_scores;
+  tir_stream->xdrop_belowscore = xdrop_belowscore;
+  tir_stream->similarity_threshold = similarity_threshold;
+  tir_stream->best_overlaps = best_overlaps;
+  tir_stream->no_overlaps = no_overlaps;
+  tir_stream->min_TSD_length = min_TSD_length;
+  tir_stream->max_TSD_length = max_TSD_length;
+  tir_stream->vicinity = vicinity;
+
   tir_stream->ssar = 
       gt_newSequentialsuffixarrayreaderfromfile(gt_str_get(str_indexname),
                                                 SARR_LCPTAB | SARR_SUFTAB |

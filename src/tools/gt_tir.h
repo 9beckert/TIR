@@ -16,11 +16,8 @@
   OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
 
-/*
- * Finds Terminal Inverted Repeats and does... something... with them.
- * To be edited when we know more.
- */
-
+/* Finds Terminal Inverted Repeats and puts them into desired output format */
+ 
 #ifndef GT_TIR_H
 #define GT_TIR_H
 

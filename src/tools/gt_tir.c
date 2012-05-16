@@ -22,6 +22,7 @@
  */
 
 #include "core/ma.h"
+#include "core/undef_api.h"
 #include "core/unused_api.h"
 #include "extended/gff3_out_stream_api.h"
 #include "ltr/ltr_xdrop.h"
@@ -31,13 +32,20 @@
 /* struct with all arguments */
 typedef struct {
   GtStr *str_indexname;         // for reading of the enhanced suffix array
-  unsigned long minseedlength;
-  Arbitraryscores arbitscores;
+  unsigned long min_seed_length,
+                min_TIR_length,
+                max_TIR_length,
+                min_TIR_distance,
+                max_TIR_distance;
+  Arbitraryscores arbit_scores;
   int xdrop_belowscore;
   double similarity_threshold;
   GtStr *str_overlaps;
   bool best_overlaps;
   bool no_overlaps;
+  unsigned long min_TSD_length,
+                max_TSD_length,
+                vicinity;
   GtOption *optionoverlaps;
 } GtTirArguments;
 
@@ -72,15 +80,22 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
 {
   GtTirArguments *arguments = tool_arguments;
   GtOptionParser *op;
-  GtOption *optionindex,  /* index */
-           *optionseed,   /* minseedlength */ 
-           *optionmat,    /* arbitrary scores */
+  GtOption *optionindex,      /* index */
+           *optionseed,       /* minseedlength */ 
+           *optionminlentir,  /* minimal length of TIR */
+           *optionmaxlentir,  /* maximal length of TIR */
+           *optionmindisttir, /* minimal distance of TIRs */
+           *optionmaxdisttir, /* maximal distance of TIRs */
+           *optionmat,        /* arbitrary scores */
            *optionmis,
            *optionins,
            *optiondel,
-           *optionxdrop,  /* xdropbelowscore for extension alignment */
-           *optionsimilar,/* similarity threshold */
-           *optionoverlaps; /* for overlaps */
+           *optionxdrop,      /* xdropbelowscore for extension alignment */
+           *optionsimilar,    /* similarity threshold */
+           *optionoverlaps,   /* for overlaps */
+           *optionmintsd,     /* minimal length for Target Site Duplication */
+           *optionmaxtsd,     /* maximal length for Target Site Duplication */
+           *optionvicinity;   /* vicinity around TIRs to be searched for TSDs */
     static const char *overlaps[] = {
     "best", /* the default */
     "no",
@@ -106,19 +121,55 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   optionseed = gt_option_new_ulong_min("seed",
                                "specify minimum seed length for"
                                " exact repeats",
-                               &arguments->minseedlength,
+                               &arguments->min_seed_length,
                                20UL,
                                2UL);
   gt_option_parser_add_option(op, optionseed); 
   
+  /* -minlentir */
+  optionminlentir = gt_option_new_ulong_min_max("minlentir",
+                               "specify minimum length for each TIR",
+                               &arguments->min_TIR_length,
+                               100UL,
+                               1UL,
+                               GT_UNDEF_ULONG);
+  gt_option_parser_add_option(op, optionminlentir);
+
+  /* -maxlentir */
+  optionmaxlentir = gt_option_new_ulong_min_max("maxlentir",
+                               "specify maximum length for each TIR",
+                               &arguments->max_TIR_length,
+                               1000UL,
+                               1UL,
+                               GT_UNDEF_ULONG);
+  gt_option_parser_add_option(op, optionmaxlentir); 
+  
+  /* -mindisttir */
+  optionmindisttir = gt_option_new_ulong_min_max("mindisttir",
+                               "specify minimum distance of TIRs",
+                               &arguments->min_TIR_distance,
+                               1000UL,
+                               1UL,
+                               GT_UNDEF_ULONG);
+  gt_option_parser_add_option(op, optionmindisttir);
+
+  /* -maxdisttir */
+  optionmaxdisttir = gt_option_new_ulong_min_max("maxdisttir",
+                               "specify maximum distance of TIRs",
+                               &arguments->max_TIR_distance,
+                               15000UL,
+                               1UL,
+                               GT_UNDEF_ULONG);
+  gt_option_parser_add_option(op, optionmaxdisttir);   
+  
   /* arbitrary scores */
   
   /* -mat */
-  arguments->arbitscores.gcd  = 1;      /* set only for initialization,
+  arguments->arbit_scores.gcd  = 1;      /* set only for initialization,
                                         do not change! */
   optionmat = gt_option_new_int_min("mat",
                         "specify matchscore for extension-alignment",
-                        &arguments->arbitscores.mat,
+                        &arguments->arbit_scores.mat,
                         2,
                         1);
   gt_option_parser_add_option(op, optionmat);
@@ -126,7 +177,7 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   /* -mis */
   optionmis = gt_option_new_int_max("mis",
                         "specify mismatchscore for extension-alignment",
-                        &arguments->arbitscores.mis,
+                        &arguments->arbit_scores.mis,
                         -2,
                         -1);
   gt_option_parser_add_option(op, optionmis);
@@ -134,7 +185,7 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   /* -ins */
   optionins = gt_option_new_int_max("ins",
                         "specify insertionscore for extension-alignment",
-                        &arguments->arbitscores.ins,
+                        &arguments->arbit_scores.ins,
                         -3,
                         -1);
   gt_option_parser_add_option(op, optionins);
@@ -142,7 +193,7 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   /* -del */
   optiondel = gt_option_new_int_max("del",
                         "specify deletionscore for extension-alignment",
-                        &arguments->arbitscores.del,
+                        &arguments->arbit_scores.del,
                         -3,
                         -1);
   gt_option_parser_add_option(op, optiondel);
@@ -174,6 +225,38 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
                overlaps);
   gt_option_parser_add_option(op, optionoverlaps);
   arguments->optionoverlaps = gt_option_ref(optionoverlaps);
+  
+  // TODO rausfinden, was sinnvolle Standardwerte bei TIRs sind
+  /* -mintsd */
+  optionmintsd = gt_option_new_ulong_min_max("mintsd",
+                              "specify minimum length for each TSD",
+                               &arguments->min_TSD_length,
+                               4U,
+                               0,
+                               GT_UNDEF_UINT);
+  gt_option_parser_add_option(op, optionmintsd);
+
+  /* -maxtsd */
+  optionmaxtsd = gt_option_new_ulong_min_max("maxtsd",
+                              "specify maximum length for each TSD",
+                               &arguments->max_TSD_length,
+                               20U,
+                               0,
+                               GT_UNDEF_UINT);
+  gt_option_parser_add_option(op, optionmaxtsd);
+  gt_option_imply(optionmaxtsd, optionmintsd);
+  
+  /* -vicinity */
+  optionvicinity = gt_option_new_ulong_min_max("vic",
+                        "specify the number of nucleotides (to the left and "
+                        "to the right) that will be searched "
+                        "for TSDs around 5' and 3' boundary "
+                        "of predicted TIRs",
+                        &arguments->vicinity,
+                        60U,
+                        1U,
+                        500U);
+  gt_option_parser_add_option(op, optionvicinity);
 
   return op;
 }
@@ -261,12 +344,19 @@ static int gt_tir_runner(int argc, const char **argv,
 
   /* Create TIR stream MUHAHA */
   tir_stream = gt_tir_stream_new(arguments->str_indexname,
-                                 arguments->minseedlength,
-                                 arguments->arbitscores,
+                                 arguments->min_seed_length,
+                                 arguments->min_TIR_length,
+                                 arguments->max_TIR_length,
+                                 arguments->min_TIR_distance,
+                                 arguments->max_TIR_distance,
+                                 arguments->arbit_scores,
                                  arguments->xdrop_belowscore,
                                  arguments->similarity_threshold,
                                  arguments->best_overlaps,
                                  arguments->no_overlaps,
+                                 arguments->min_TSD_length,
+                                 arguments->max_TSD_length,
+                                 arguments->vicinity,
                                  err);
   
   if (tir_stream == NULL)
