@@ -24,6 +24,7 @@
 #include <stdbool.h>
 #include "core/arraydef.h"
 #include "core/encseq.h"
+#include "core/log_api.h"
 #include "core/mathsupport.h"
 #include "core/minmax.h"
 #include "core/str_api.h"
@@ -60,6 +61,7 @@ typedef struct
                 right_tir_start, /* first position of TIR on reverse strand */  
                 right_tir_end;   /* last position of TIR on reverse strand */   
   double        similarity;      /* similarity of the two TIRs */
+  bool          skip;           /* needed to remove overlaps if wanted */
 } TIRPair;
 
 GT_DECLAREARRAYSTRUCT(TIRPair);
@@ -89,6 +91,8 @@ struct GtTIRStream
   unsigned long num_of_tirs;          /* number of TIRs found */
   unsigned long cur_elem_index;       /* index of the TIR to be put out next */
   unsigned long prev_seqnum;          /* number of previous contig */
+  bool no_overlaps;
+  bool best_overlaps;
 };
 
 /*
@@ -246,6 +250,96 @@ static void gt_sort_TIRs(GtArrayTIRPair *tir_pairs,unsigned long start, unsigned
   
 }
 
+/* removes overlaps or saves tir with best similarity and returns the lasting number of tirs in the array*/
+
+static unsigned long gt_remove_overlaps(GtArrayTIRPair *src, GtArrayTIRPair *dest, unsigned long size_of_array, bool remove_all)
+{
+  TIRPair *new_pair;
+  TIRPair *pair1;
+  TIRPair *pair2;
+  unsigned long start_pair1;
+  unsigned long end_pair1;
+  unsigned long start_pair2;
+  unsigned long end_pair2;
+  unsigned long num_of_tirs = size_of_array;
+  int i;
+  int j;
+
+  
+  for(i = 0; i < size_of_array; i++)
+  {
+    pair1 = &src->spaceTIRPair[i];
+    
+    /* to prevent that a skipped one is checked twice */
+    if(pair1->skip)
+    {
+      continue;
+    }
+    start_pair1 = pair1->left_tir_start;
+    end_pair1 = pair1->right_tir_end;
+    
+    for(j = i + 1; j < size_of_array; j++)
+    {
+      pair2 = &src->spaceTIRPair[j];
+      
+      /* to prevent that a skipped one is checked twice */
+      if(pair2->skip)
+      {
+        continue;
+      }
+      start_pair2 = pair2->left_tir_start;
+      end_pair2 = pair2->right_tir_end;
+      
+      /* check if there is an overlap */
+      if(!((end_pair1 < start_pair2) || (end_pair2 < start_pair1)))
+      {
+        /* no overlaps allowed */
+        if(remove_all)
+        {
+          //TODO verstehen, warum LTRharvest die min_startpos und die max_endpos nimmt
+          /* set skip to delete the tirs later */
+          pair1->skip = true;
+          pair2->skip = true;
+          num_of_tirs = num_of_tirs - 2;
+        }
+        else
+        {
+          /* take the tir with best similarity */
+          if(pair1->similarity >= pair2->similarity)
+          {
+            pair2->skip = true;
+            num_of_tirs = num_of_tirs - 1;
+          }
+          else
+          {
+            pair1->skip = true;
+            num_of_tirs = num_of_tirs - 1;
+            break;
+          }
+        }
+      }
+    }
+  }
+  
+  /* the tirs without overlaps store in another array */
+  for(i = 0; i < size_of_array; i++)
+  {
+    pair1 = &src->spaceTIRPair[i];
+    
+    if(!pair1->skip)
+    {
+      GT_GETNEXTFREEINARRAY(new_pair, dest, TIRPair, 5);
+      new_pair->contignumber = pair1->contignumber;
+      new_pair->left_tir_start = pair1->left_tir_start;
+      new_pair->left_tir_end = pair1->left_tir_end;
+      new_pair->right_tir_start = pair1->right_tir_start;
+      new_pair->right_tir_end = pair1->right_tir_end;
+      new_pair->similarity = pair1->similarity;
+    }
+  }
+  return num_of_tirs;
+}
+
 /*
  * Extends the Seeds and searches for TIRs.
  */
@@ -256,6 +350,9 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
 {
   int count;
   unsigned long seedcounter = 0;
+  GtArrayTIRPair new;             /* need to remove overlaps */
+  unsigned long right_tir_start;  /* need to calculate the reverse position */
+  unsigned long right_tir_end;    /* need to calculate the reverse position */
   GtArrayMyfrontvalue fronts; /* needed to use xdrop */
   Myxdropbest xdropbest_left; /* return parameters for xdrop */
   Myxdropbest xdropbest_right;
@@ -327,13 +424,14 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
     pair->left_tir_end = seedptr->pos1 + seedptr->len - 1 + xdropbest_right.ivalue;
     
     /* We want the actual positions (not mirrored) */
-    unsigned long right_tir_start = seedptr->pos2 + seedptr->len - 1 + xdropbest_right.jvalue; // end of mirrored is start of actual TIR
-    unsigned long right_tir_end   = seedptr->pos2 - xdropbest_left.jvalue;  // start of mirrored is end of actual TIR
+    right_tir_start = seedptr->pos2 + seedptr->len - 1 + xdropbest_right.jvalue; // end of mirrored is start of actual TIR
+    right_tir_end   = seedptr->pos2 - xdropbest_left.jvalue;  // start of mirrored is end of actual TIR
     
     /* We can get the corresponding position of a mirrored one with GT_REVERSEPOS(total length,position) */
     pair->right_tir_start = GT_REVERSEPOS(total_length,right_tir_start);
     pair->right_tir_end = GT_REVERSEPOS(total_length,right_tir_end); 
     pair->similarity = 0.0;
+    pair->skip = false;
     
     /* Check similarity */
     left_tir_length = pair->left_tir_end - pair->left_tir_start + 1;
@@ -384,15 +482,29 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
   FREESPACE(left_tir_char);
   FREESPACE(right_tir_char);
   
+  /* initialize array for removing overlaps */
+  GT_INITARRAY(&new, TIRPair);
+  
+  /* remove overlaps if wanted */
+  if(tir_stream->best_overlaps || tir_stream->no_overlaps)
+  {
+    tir_stream->num_of_tirs = gt_remove_overlaps(tir_pairs, &new, tir_stream->num_of_tirs, tir_stream->no_overlaps);
+  }
+  
+  /* set references to the new array and free old array, that is not needed any longer */
+  GT_FREEARRAY(tir_pairs, TIRPair);
+  tir_stream->tir_pairs = new;
+  tir_pairs = &new; 
+  
   /* sort the tir_pairs */
   gt_sort_TIRs(tir_pairs, 0, tir_stream->num_of_tirs);
   
     
   /* output on console */
-  printf("TIRs found:\n");
+  gt_log_log("TIRs found:\n");
   for(count = 0; count < tir_stream->tir_pairs.nextfreeTIRPair; count++)
   {
-    printf("contig %lu\n left: start %lu, end %lu\n right: start %lu, end %lu\n similarity: %f\n\n", 
+    gt_log_log("contig %lu\n left: start %lu, end %lu\n right: start %lu, end %lu\n similarity: %f\n\n", 
       tir_stream->tir_pairs.spaceTIRPair[count].contignumber,
       tir_stream->tir_pairs.spaceTIRPair[count].left_tir_start,
       tir_stream->tir_pairs.spaceTIRPair[count].left_tir_end,
@@ -441,7 +553,7 @@ static int gt_tir_stream_next(GtNodeStream *ns,
     /* free the seed array since we don't need it any longer */
     GT_FREEARRAY(&tir_stream->seedarray, Seed);
     
-    // TODO apply further filters like removing duplicates ? do we need that?
+    // TODO apply further filters like removing duplicates
 
     tir_stream->state = GT_TIR_STREAM_STATE_REGIONS;
   }
@@ -689,6 +801,8 @@ GtNodeStream* gt_tir_stream_new(GtStr *str_indexname,
                                 Arbitraryscores arbitscores,
                                 int xdrop_belowscore,
                                 double similarity_threshold,
+                                bool best_overlaps,
+                                bool no_overlaps,
                                 GtError *err)
 {
   int had_err = 0;
@@ -701,6 +815,8 @@ GtNodeStream* gt_tir_stream_new(GtStr *str_indexname,
   tir_stream->similarity_threshold = similarity_threshold;
   tir_stream->num_of_tirs = 0;
   tir_stream->cur_elem_index = 0;
+  tir_stream->best_overlaps = best_overlaps;
+  tir_stream->no_overlaps = no_overlaps;
   tir_stream->prev_seqnum = GT_UNDEF_ULONG;
   tir_stream->state = GT_TIR_STREAM_STATE_START;
   tir_stream->ssar = 

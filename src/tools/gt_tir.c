@@ -35,6 +35,10 @@ typedef struct {
   Arbitraryscores arbitscores;
   int xdrop_belowscore;
   double similarity_threshold;
+  GtStr *str_overlaps;
+  bool best_overlaps;
+  bool no_overlaps;
+  GtOption *optionoverlaps;
 } GtTirArguments;
 
 /*
@@ -44,6 +48,7 @@ static void* gt_tir_arguments_new(void)
 {
   GtTirArguments *arguments = gt_calloc(1, sizeof *arguments);
   arguments->str_indexname = gt_str_new();
+  arguments->str_overlaps = gt_str_new();
   return arguments;
 }
 
@@ -55,6 +60,8 @@ static void gt_tir_arguments_delete(void *tool_arguments)
   GtTirArguments *arguments = tool_arguments;
   if (!arguments) return;
   gt_str_delete(arguments->str_indexname);
+  gt_str_delete(arguments->str_overlaps);
+  gt_option_delete(arguments->optionoverlaps);
   gt_free(arguments);
 }
 
@@ -72,8 +79,14 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
            *optionins,
            *optiondel,
            *optionxdrop,  /* xdropbelowscore for extension alignment */
-           *optionsimilar;/* similarity threshold */
-           //*optiongff3;   /* gff3file for output */
+           *optionsimilar,/* similarity threshold */
+           *optionoverlaps; /* for overlaps */
+    static const char *overlaps[] = {
+    "best", /* the default */
+    "no",
+    "all",
+    NULL
+  };
   
   gt_assert(arguments);
 
@@ -153,12 +166,14 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
                                100.0);
   gt_option_parser_add_option(op, optionsimilar);
   
-  /* -gff3 */
- /* optiongff3 = gt_option_new_string("gff3",
-                                    "specify GFF3 outputfilename",
-                                    arguments->str_gff3filename, NULL);
-  //gt_option_is_mandatory(optiongff3);
-  gt_option_parser_add_option(op, optiongff3);*/
+  /* -overlaps */
+  optionoverlaps = gt_option_new_choice("overlaps",
+               "specify no|best|all",
+               arguments->str_overlaps,
+               overlaps[0],
+               overlaps);
+  gt_option_parser_add_option(op, optionoverlaps);
+  arguments->optionoverlaps = gt_option_ref(optionoverlaps);
 
   return op;
 }
@@ -167,7 +182,7 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
  * Check for further dependencies.
  * Currently not needed.
  */
-/*static int gt_tir_arguments_check(GT_UNUSED int rest_argc,
+static int gt_tir_arguments_check(GT_UNUSED int rest_argc,
                                        void *tool_arguments,
                                        GT_UNUSED GtError *err)
 {
@@ -176,13 +191,41 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   gt_error_check(err);
   gt_assert(arguments);
 
-   XXX: do some checking after the option have been parsed (usally this is not
-     necessary and this function can be removed completely). 
-  if (gt_str_length(arguments->str_option_tir))
-    printf("%s\n", gt_str_get(arguments->str_option_tir));
+  if (!had_err) 
+  {
+    if (gt_option_is_set(arguments->optionoverlaps))
+    {
+      if (strcmp(gt_str_get(arguments->str_overlaps), "no") == 0)
+      {
+        arguments->best_overlaps = false;
+        arguments->no_overlaps = true;
+      }
+      else if (strcmp(gt_str_get(arguments->str_overlaps), "best") == 0 )
+      {
+        arguments->best_overlaps = true;
+        arguments->no_overlaps = false;
+      }
+      else if (strcmp(gt_str_get(arguments->str_overlaps), "all") == 0 )
+      {
+        arguments->best_overlaps = false;
+        arguments->no_overlaps = false;
+      }
+      else
+      {
+        gt_assert(0); /* cannot happen */
+      }
+    }
+    else
+    {
+      /* default is "best" */
+      arguments->best_overlaps = true;  /* take best prediction
+                                          if overlap occurs, default */
+      arguments->no_overlaps = false; /* overlapping predictions (not) allowed*/
+    }
+  }
 
   return had_err;
-}*/
+}
 
 /*
  * Print arguments to console.
@@ -207,7 +250,6 @@ static int gt_tir_runner(int argc, const char **argv,
   void *tool_arguments,   // argument struct
   GtError *err) // error messages
 {
- // GtFile *gff3file = NULL;
   GtTirArguments *arguments = tool_arguments;
   GtNodeStream *tir_stream = NULL,
                *gff3_out_stream = NULL,
@@ -223,6 +265,8 @@ static int gt_tir_runner(int argc, const char **argv,
                                  arguments->arbitscores,
                                  arguments->xdrop_belowscore,
                                  arguments->similarity_threshold,
+                                 arguments->best_overlaps,
+                                 arguments->no_overlaps,
                                  err);
   
   if (tir_stream == NULL)
@@ -232,18 +276,9 @@ static int gt_tir_runner(int argc, const char **argv,
   
   last_stream = tir_stream;
   
-  /* gff3 out stream */
-  
-  /*gff3file = gt_file_open(GT_FILE_MODE_UNCOMPRESSED,
-                          gt_str_get(arguments->str_gff3filename),
-                          "w+",
-                          err);
-  if (gff3file == NULL) 
-  {
-    had_err = -1;
-  } */
-    gff3_out_stream = gt_gff3_out_stream_new(last_stream, NULL);
-    last_stream = gff3_out_stream;
+  /* gff3 outstream */
+  gff3_out_stream = gt_gff3_out_stream_new(last_stream, NULL);
+  last_stream = gff3_out_stream;
   
   /* output arguments line */
   gt_tir_showargsline(argc, argv);
@@ -269,6 +304,6 @@ GtTool* gt_tir(void)
   return gt_tool_new(gt_tir_arguments_new,
                   gt_tir_arguments_delete,
                   gt_tir_option_parser_new,
-                  NULL, //gt_tir_arguments_check,
+                  gt_tir_arguments_check,
                   gt_tir_runner);
 }

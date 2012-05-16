@@ -34,5 +34,7 @@ GtNodeStream*            gt_tir_stream_new(GtStr *str_indexname,
                                 Arbitraryscores arbitscores,
                                 int xdrop_belowscore,
                                 double similarity_threshold,
+                                bool best_overlaps,
+                                bool no_overlaps,
                                 GtError *err);
 #endif
