@@ -127,7 +127,7 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   gt_option_parser_add_option(op, optionseed); 
   
   /* -minlentir */
-  optionminlentir = gt_option_new_ulong_min_max("minlentir",
+  optionminlentir = gt_option_new_ulong_min_max("mintirlen",
                                "specify minimum length for each TIR",
                                &arguments->min_TIR_length,
                                100UL,
@@ -136,7 +136,7 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   gt_option_parser_add_option(op, optionminlentir);
 
   /* -maxlentir */
-  optionmaxlentir = gt_option_new_ulong_min_max("maxlentir",
+  optionmaxlentir = gt_option_new_ulong_min_max("maxtirlen",
                                "specify maximum length for each TIR",
                                &arguments->max_TIR_length,
                                1000UL,
@@ -145,7 +145,7 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   gt_option_parser_add_option(op, optionmaxlentir); 
   
   /* -mindisttir */
-  optionmindisttir = gt_option_new_ulong_min_max("mindisttir",
+  optionmindisttir = gt_option_new_ulong_min_max("mintirdist",
                                "specify minimum distance of TIRs",
                                &arguments->min_TIR_distance,
                                1000UL,
@@ -154,7 +154,7 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   gt_option_parser_add_option(op, optionmindisttir);
 
   /* -maxdisttir */
-  optionmaxdisttir = gt_option_new_ulong_min_max("maxdisttir",
+  optionmaxdisttir = gt_option_new_ulong_min_max("maxtirdist",
                                "specify maximum distance of TIRs",
                                &arguments->max_TIR_distance,
                                15000UL,

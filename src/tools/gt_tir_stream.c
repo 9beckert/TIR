@@ -310,9 +310,16 @@ static unsigned long gt_remove_overlaps(GtArrayTIRPair *src, GtArrayTIRPair *des
         {
           //TODO verstehen, warum LTRharvest die min_startpos und die max_endpos nimmt
           /* set skip to delete the tirs later */
+          if(!pair1->skip)
+          {
+            num_of_tirs = num_of_tirs - 2;
+          }
+          else
+          {
+            num_of_tirs = num_of_tirs - 1;
+          }
           pair1->skip = true;
           pair2->skip = true;
-          num_of_tirs = num_of_tirs - 2;
         }
         else
         {
@@ -517,12 +524,12 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
   if(tir_stream->best_overlaps || tir_stream->no_overlaps)
   {
     tir_stream->num_of_tirs = gt_remove_overlaps(tir_pairs, &new, tir_stream->num_of_tirs, tir_stream->no_overlaps);
-  }
-  
+      
   /* set references to the new array and free old array, that is not needed any longer */
   GT_FREEARRAY(tir_pairs, TIRPair);
   tir_stream->tir_pairs = new;
   tir_pairs = &new; 
+  }
   
   /* sort the tir_pairs */
   gt_sort_TIRs(tir_pairs, 0, tir_stream->num_of_tirs);
