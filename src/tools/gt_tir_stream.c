@@ -19,6 +19,7 @@
 /* A stream, which finds Terminal Inverted Repeats in the encoded sequence
    and returns a pair of them with every next-call. */
 
+#include <limits.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -34,9 +35,11 @@
 #include "extended/region_node_api.h"
 #include "ltr/ltr_xdrop.h"
 #include "match/esa-maxpairs.h"
+#include "match/esa-mmsearch.h"
 #include "match/esa-seqread.h"
 #include "match/greedyedist.h"
 #include "match/spacedef.h"
+#include "match/querymatch.h"
 #include "tools/gt_tir_stream.h"
 
 /* A pair of Seeds (identical inverted parts in the sequence) */
@@ -44,8 +47,7 @@ typedef struct
 {
   unsigned long pos1;         /* position of first seed */
   unsigned long pos2;         /* position of seconf seed (other contig) */
-  unsigned long offset;       /* distance between them related to the actual sequence 
-				 (not mirrored) */
+  unsigned long offset;       /* distance between them related to the actual sequence (not mirrored) */
   unsigned long len;          /* length of the seed  */
   unsigned long contignumber; /* number of contig for this seed */
 } Seed;
@@ -62,9 +64,18 @@ typedef struct
                 right_tir_end;   /* last position of TIR on reverse strand */   
   double        similarity;      /* similarity of the two TIRs */
   bool          skip;           /* needed to remove overlaps if wanted */
+  unsigned long tsd_length;     /* length of tsd at start of left tir and end of right tir */
 } TIRPair;
 
 GT_DECLAREARRAYSTRUCT(TIRPair);
+
+/* A little struct to store all stuff needed to process TSDs */
+typedef struct
+{
+  unsigned long left_start_pos,   /* represents the start position for the TSD search */
+                right_start_pos;
+  GtArraySeed TSDs;               /* array to store the TSDs */
+}TSDinfo;
 
 /* currently not really in use */
 typedef enum {
@@ -193,6 +204,23 @@ static int gt_store_seeds(void *info,
   return 0;
 }
 
+/* this function is a call back function to store all TSDs found */
+
+static int gt_store_TSDs(void *info, GT_UNUSED const GtEncseq *encseq, const Querymatch *querymatch, GT_UNUSED GtError *err)
+{
+  Seed *nextfree;
+  TSDinfo *TSDs = (TSDinfo *) info;
+  
+  /* store the TSD at the next free index of info */
+  GT_GETNEXTFREEINARRAY(nextfree, &TSDs->TSDs, Seed, 10);
+  nextfree->pos1 = TSDs->left_start_pos + gt_querymatch_dbstart(querymatch);
+  nextfree->offset = TSDs->right_start_pos + gt_querymatch_querystart(querymatch) - (nextfree->pos1);
+  nextfree->len = gt_querymatch_len(querymatch);
+  
+  return 0;
+}
+
+/* compares two tirs */
 static int gt_compare_TIRs(TIRPair *pair1, TIRPair *pair2)
 {
   if(pair1->contignumber < pair2->contignumber)
@@ -340,7 +368,7 @@ static unsigned long gt_remove_overlaps(GtArrayTIRPair *src, GtArrayTIRPair *des
     }
   }
   
-  /* the tirs without overlaps store in another array */
+  /* the tirs without overlaps store in the new array */
   for(i = 0; i < size_of_array; i++)
   {
     pair1 = &src->spaceTIRPair[i];
@@ -348,15 +376,195 @@ static unsigned long gt_remove_overlaps(GtArrayTIRPair *src, GtArrayTIRPair *des
     if(!pair1->skip)
     {
       GT_GETNEXTFREEINARRAY(new_pair, dest, TIRPair, 5);
-      new_pair->contignumber = pair1->contignumber;
-      new_pair->left_tir_start = pair1->left_tir_start;
-      new_pair->left_tir_end = pair1->left_tir_end;
-      new_pair->right_tir_start = pair1->right_tir_start;
-      new_pair->right_tir_end = pair1->right_tir_end;
-      new_pair->similarity = pair1->similarity;
+      *new_pair = *pair1;
     }
   }
   return num_of_tirs;
+}
+
+/* this function finds the best TSD */
+static void gt_find_best_TSD(TSDinfo *info,
+                             GtTIRStream *tir_stream,
+                             TIRPair *tir_pair)
+{
+   int i;
+   int j;
+   Seed *tsd;
+   unsigned long tsd_length;
+   unsigned long optimal_tsd_length;
+   unsigned long new_left_tir_start = tir_pair->left_tir_start;
+   unsigned long new_right_tir_end = tir_pair->right_tir_end;
+   unsigned long new_cost_left = 0;
+   unsigned long new_cost_right = 0;
+   unsigned long best_cost = ULONG_MAX;
+   unsigned long new_cost = 0;
+   
+   for(i = 0; i < info->TSDs.nextfreeSeed; i++)
+   {
+      
+      tsd = &info->TSDs.spaceSeed[i];
+      optimal_tsd_length = tsd->len;
+      for(j = 0; j < tsd->len - tir_stream->min_TSD_length + 1; j++)
+      {
+        tsd_length = tsd->len - j;
+        /* max len constraint */
+        if(tsd_length < tir_stream->max_TSD_length)
+        {
+          if(tsd->pos1 + tsd_length - 1 < tir_pair->left_tir_start)
+          {
+            new_cost_left = tir_pair->left_tir_start - (tsd->pos1 + tsd_length - 1);
+          }
+          else
+          {
+            new_cost_left = (tsd->pos1 + tsd_length - 1) - tir_pair->left_tir_start;
+          }
+          
+          if(tir_pair->right_tir_end < tsd->pos1 + tsd->offset)
+          {
+            new_cost_right = (tsd->pos1 + tsd->offset) - tir_pair->right_tir_end;
+          }
+          else
+          {
+            new_cost_right = tir_pair->right_tir_end - (tsd->pos1 + tsd->offset);
+          }
+          
+          new_cost = new_cost_left + new_cost_right;
+          
+          if(new_cost < best_cost)
+          {
+            best_cost = new_cost;
+            new_left_tir_start = tsd->pos1 + tsd_length;
+            new_right_tir_end = tsd->pos1 + tsd->offset - 1;
+            optimal_tsd_length = tsd_length;
+          }
+           
+        }
+      }
+   }
+   /* save the new borders and tsd length */
+   if(info->TSDs.nextfreeSeed > 0)
+   {
+     tir_pair->left_tir_start = new_left_tir_start;
+     tir_pair->right_tir_end = new_right_tir_end;
+     tir_pair->tsd_length = optimal_tsd_length;
+   }
+}
+
+
+/* this function searches for TSDs in the range of vicinity around the TIRs */
+static int gt_search_for_TSDs(GtTIRStream *tir_stream, TIRPair *tir_pair, const GtEncseq *encseq, GtError *err)
+{
+  unsigned long start_left_tir,
+                end_left_tir,
+                start_right_tir,
+                end_right_tir,
+                left_length,
+                right_length,
+                seq_end_pos,
+                seq_start_pos,
+                seq_length;
+  unsigned long contignumber = tir_pair->contignumber;
+  TSDinfo info;
+  bool haserr = false;
+
+  gt_error_check(err);
+
+  /* check border cases */
+
+  /* check vicinity for left tir start */
+  seq_start_pos = gt_encseq_seqstartpos(encseq, contignumber);
+  seq_length = gt_encseq_seqlength(encseq, contignumber);
+  
+  /* check if left tir start with vicinity aligns over sequence border */
+  if(tir_pair->left_tir_start - seq_start_pos < tir_stream->vicinity)
+  {
+    start_left_tir = seq_start_pos;
+  }
+  else
+  {
+    start_left_tir = tir_pair->left_tir_start - tir_stream->vicinity;
+  }
+  
+  /* do not align over end of left tir */
+  if(tir_pair->left_tir_start + tir_stream->vicinity > tir_pair->left_tir_end)
+  {
+    end_left_tir = tir_pair->left_tir_end;
+  }
+  else
+  {
+    end_left_tir = tir_pair->left_tir_start + tir_stream->vicinity;
+  }
+  
+  left_length = end_left_tir - start_left_tir + 1;
+
+  /* vicinity of 3'-border of right tir
+     do not align over 5'border of right tir */
+  if(tir_pair->right_tir_end - tir_stream->vicinity < tir_pair->right_tir_start)
+  {
+    start_right_tir = tir_pair->right_tir_start;
+  }
+  else
+  {
+    start_right_tir = tir_pair->right_tir_end - tir_stream->vicinity;
+  }
+  
+  seq_end_pos = seq_start_pos + seq_length - 1;
+  
+  /* do not align into next sequence in case of need decrease alignment
+     length */
+  if (tir_pair->right_tir_end + tir_stream->vicinity > seq_end_pos)
+  {
+    end_right_tir = seq_end_pos;
+  }
+  else
+  {
+    end_right_tir = tir_pair->right_tir_end + tir_stream->vicinity;
+  }
+  
+  right_length = end_right_tir - start_right_tir + 1;
+
+  /* search for TSDs */
+  if (tir_stream->min_TSD_length > 1U)
+  {
+    /* dbseq (left) and query (right) are the encseqs wich will be aligned */
+    GtUchar *dbseq, *query;
+    ALLOCASSIGNSPACE(dbseq,NULL,GtUchar,left_length);
+    ALLOCASSIGNSPACE(query,NULL,GtUchar,right_length);
+
+    gt_encseq_extract_encoded(encseq,dbseq,start_left_tir,end_left_tir);
+    gt_encseq_extract_encoded(encseq,query,start_right_tir, end_right_tir);
+    GT_INITARRAY(&info.TSDs, Seed);
+    gt_assert(start_left_tir < start_right_tir);
+    info.left_start_pos = start_left_tir;
+    info.right_start_pos = start_right_tir; 
+    
+    
+    if (gt_sarrquerysubstringmatch(dbseq,
+                                   left_length,
+                                   query,
+                                   right_length,
+                                   tir_stream->min_TSD_length,
+                                   gt_encseq_alphabet(encseq),
+                                   gt_store_TSDs,
+                                   &info,
+                                   NULL,
+                                   err) != 0)
+    {
+       haserr = true;
+    }
+
+    FREESPACE(dbseq);
+    FREESPACE(query);
+
+    /* find the best TSD */
+    if (!haserr)
+    {
+      gt_find_best_TSD(&info, tir_stream, tir_pair);
+    }
+    GT_FREEARRAY(&info.TSDs, Seed);
+  }
+  
+  return haserr ? -1 : 0;
 }
 
 /*
@@ -453,6 +661,8 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
     pair->similarity = 0.0;
     pair->skip = false;
     
+    had_err = gt_search_for_TSDs(tir_stream, pair, encseq, err);
+    
     /* Calculate TIR lengths and distance*/
     left_tir_length = pair->left_tir_end - pair->left_tir_start + 1;
     right_tir_length = pair->right_tir_end - pair->right_tir_start + 1;
@@ -525,10 +735,10 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
   {
     tir_stream->num_of_tirs = gt_remove_overlaps(tir_pairs, &new, tir_stream->num_of_tirs, tir_stream->no_overlaps);
       
-  /* set references to the new array and free old array, that is not needed any longer */
-  GT_FREEARRAY(tir_pairs, TIRPair);
-  tir_stream->tir_pairs = new;
-  tir_pairs = &new; 
+    /* set references to the new array and free old array, that is not needed any longer */
+    GT_FREEARRAY(tir_pairs, TIRPair);
+    tir_stream->tir_pairs = new;
+    tir_pairs = &new; 
   }
   
   /* sort the tir_pairs */
@@ -589,7 +799,6 @@ static int gt_tir_stream_next(GtNodeStream *ns,
     /* free the seed array since we don't need it any longer */
     GT_FREEARRAY(&tir_stream->seedarray, Seed);
     
-    // TODO apply further filters like removing duplicates
 
     tir_stream->state = GT_TIR_STREAM_STATE_REGIONS;
   }
