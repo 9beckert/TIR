@@ -113,15 +113,18 @@ struct GtTIRStream
   bool                        no_overlaps;          /* if true all overlaps will be deleted */
   bool                        best_overlaps;        /* if nooverlaps false and this true, of overlapping TIRs 
                                                        only the one with best similary will remain */
-  unsigned long               min_TSD_length,       /* minimal length of TSD TODO */
-                              max_TSD_length,       /* maxlimal length of TSD TODO */
-                              vicinity;             /* vicinity to be searched for TSDs TODO */
+  unsigned long               min_TSD_length,       /* minimal length of TSD */
+                              max_TSD_length,       /* maxlimal length of TSD */
+                              vicinity;             /* vicinity to be searched for TSDs */
 };
 
 /*
  * Stores the seeds in an array.
  * (processmaxpairs call-back-function)
  */
+//TODO seeds schon rauswählen, wenn seed + max_len_tir nicht distance constraints erfüllt
+//TODO einzelne chromosomen testen
+//TODO 
 static int gt_store_seeds(void *info,
                           const GtEncseq *encseq,
                           unsigned long len,
@@ -531,8 +534,10 @@ static int gt_search_for_TSDs(GtTIRStream *tir_stream, TIRPair *tir_pair, const 
     ALLOCASSIGNSPACE(dbseq,NULL,GtUchar,left_length);
     ALLOCASSIGNSPACE(query,NULL,GtUchar,right_length);
 
+		//TODO vor einem aufruf hier passiert ab einer gewissen größe ein speicherzugriffsfehler -.-
     gt_encseq_extract_encoded(encseq,dbseq,start_left_tir,end_left_tir);
-    gt_encseq_extract_encoded(encseq,query,start_right_tir, end_right_tir);
+    gt_encseq_extract_encoded(encseq,query,start_right_tir,end_right_tir);
+
     GT_INITARRAY(&info.TSDs, Seed);
     gt_assert(start_left_tir < start_right_tir);
     info.left_start_pos = start_left_tir;
@@ -566,6 +571,7 @@ static int gt_search_for_TSDs(GtTIRStream *tir_stream, TIRPair *tir_pair, const 
   
   return haserr ? -1 : 0;
 }
+
 
 /*
  * Extends the Seeds and searches for TIRs.
@@ -663,12 +669,21 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
     
     had_err = gt_search_for_TSDs(tir_stream, pair, encseq, err);
     
+       	
+   	//TODO hier möchte überlegt werden, wo dieser fehler abgefangen werden möchte
+   	if(pair->left_tir_start > pair->left_tir_end || pair->right_tir_start > pair->right_tir_end)
+   	{
+   		tir_pairs->nextfreeTIRPair--;
+   		continue;
+   	}
+    
     /* Calculate TIR lengths and distance*/
     left_tir_length = pair->left_tir_end - pair->left_tir_start + 1;
-    right_tir_length = pair->right_tir_end - pair->right_tir_start + 1;
+    right_tir_length = pair->right_tir_end - pair->right_tir_start + 1; //TODO überlegen ob das stimmt; assertion einbauen
     distance = pair->right_tir_start - pair->left_tir_start;
     
     /* Realloc tir_char if length too high */
+    //TODO das rausnehmen und immer neuen speicher verwenden und abräumen gt_malloc und gt_free
     if(left_tir_length > max_left_length)
     {
       max_left_length = left_tir_length;
@@ -681,14 +696,18 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
     }
     
     /* Store encoded substring */
+
+   	//TODO hier auch mal decoded ausprobieren (left_tir_char ist dann ein normaler string)
     gt_encseq_extract_encoded(encseq, left_tir_char,
                                          pair->left_tir_start,
                                          pair->left_tir_end);
+   //TODO right_tir_end und right_tir_start überprüfen
     gt_encseq_extract_encoded(encseq, right_tir_char,
                                          right_tir_end,
                                          right_tir_start);
     
     /* Get edit distance */
+    //TODO mal ausgeben, was hier übergeben wird | tail -n #Zeilenvonhinten
     edist = greedyunitedist(left_tir_char,(unsigned long) left_tir_length, 
                             right_tir_char,(unsigned long) right_tir_length);
                             
@@ -715,7 +734,6 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
         tir_stream->similarity_threshold))                                              
     {
       tir_pairs->nextfreeTIRPair--;
-
     }
     else
     {
