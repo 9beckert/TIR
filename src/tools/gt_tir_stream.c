@@ -51,8 +51,16 @@ typedef struct
   unsigned long len;          /* length of the seed  */
   unsigned long contignumber; /* number of contig for this seed */
 } Seed;
-
 GT_DECLAREARRAYSTRUCT(Seed);
+
+typedef struct
+{
+	GtArraySeed seed;
+	unsigned long max_tir_length;
+	unsigned long min_tir_length;
+	unsigned long max_tir_distance;
+	unsigned long min_tir_distance;
+} SeedInfo;												/* this is needed, to check distance constraints for tirs while storing possible seeds */
 
 /* A pair of TIRs (extended Seeds) */
 typedef struct
@@ -92,7 +100,7 @@ struct GtTIRStream
   const GtNodeStream          parent_instance;      /* node which could be before us to call next on */  
   const GtEncseq              *encseq;              /* encoded sequence */
   Sequentialsuffixarrayreader *ssar;                /* suffix array reader */
-  GtArraySeed                 seedarray;            /* array containing our seeds */
+	SeedInfo                 		seedinfo;            	/* struct containing infos for storing seeds and a seedarray */
   GtArrayTIRPair              tir_pairs;            /* array contianing our TIRs */
   GtTIRStreamState            state;                /* current state of output */  
   
@@ -122,9 +130,6 @@ struct GtTIRStream
  * Stores the seeds in an array.
  * (processmaxpairs call-back-function)
  */
-//TODO seeds schon rauswählen, wenn seed + max_len_tir nicht distance constraints erfüllt
-//TODO einzelne chromosomen testen
-//TODO 
 static int gt_store_seeds(void *info,
                           const GtEncseq *encseq,
                           unsigned long len,
@@ -145,7 +150,8 @@ static int gt_store_seeds(void *info,
   unsigned long tmp = 0;
   bool samecontig_and_diffstrands = false;
   bool direction = false;
-  GtArraySeed *seeds = (GtArraySeed *) info;
+  bool tir_distance = true;									/* if the distance constraints for the tirs can be satisfied */
+  SeedInfo *seeds = (SeedInfo *) info;
 
   gt_error_check(err);
   
@@ -187,15 +193,38 @@ static int gt_store_seeds(void *info,
     direction = true;
   }
   
-
+	if(direction && samecontig_and_diffstrands)
+	{
+		if(pos1 - startpos_contig1 > seeds->max_tir_length - len)
+		{
+			if(((pos1 + offset) - (pos1 - seeds->max_tir_length + len)) < seeds->min_tir_distance)
+			{
+				tir_distance = false;
+			}
+		}
+		else if(pos1 - startpos_contig1 <= seeds->max_tir_length - len)
+		{
+			if(pos1 + offset - startpos_contig1 < seeds->min_tir_distance)
+			{
+				tir_distance = false;
+			}
+		}
+		else if((pos1 + offset - seeds->max_tir_length + len) > pos1)
+		{
+			if((pos1 + offset - seeds->max_tir_length + len) - pos1 > seeds->max_tir_distance)
+			{
+				tir_distance = false;
+			}
+		}
+		
+	}
   
   /* like this, cause we want to have other constraints later */
-  if (samecontig_and_diffstrands && direction)
+  if (samecontig_and_diffstrands && direction && tir_distance)
   {
     Seed *nextfreeseedpointer;
     
-    GT_GETNEXTFREEINARRAY(nextfreeseedpointer, seeds,
-                       Seed, 10);
+    GT_GETNEXTFREEINARRAY(nextfreeseedpointer, &seeds->seed, Seed, 10);
     
     nextfreeseedpointer->pos1 = pos1;
     nextfreeseedpointer->pos2 = pos2;
@@ -407,6 +436,12 @@ static void gt_find_best_TSD(TSDinfo *info,
       
       tsd = &info->TSDs.spaceSeed[i];
       optimal_tsd_length = tsd->len;
+      
+	  /* needed, because of overflow */
+      if(tsd->len <= tir_stream->min_TSD_length)
+      {
+		continue;
+	  }
       for(j = 0; j < tsd->len - tir_stream->min_TSD_length + 1; j++)
       {
         tsd_length = tsd->len - j;
@@ -478,6 +513,11 @@ static int gt_search_for_TSDs(GtTIRStream *tir_stream, TIRPair *tir_pair, const 
   seq_start_pos = gt_encseq_seqstartpos(encseq, contignumber);
   seq_length = gt_encseq_seqlength(encseq, contignumber);
   
+  gt_assert(tir_pair->left_tir_start >= seq_start_pos);
+  gt_assert(tir_pair->left_tir_start <= tir_pair->left_tir_end);
+  gt_assert(tir_pair->right_tir_start <= tir_pair->right_tir_end);
+  gt_assert(tir_pair->right_tir_end <= seq_start_pos + seq_length);
+  
   /* check if left tir start with vicinity aligns over sequence border */
   if(tir_pair->left_tir_start - seq_start_pos < tir_stream->vicinity)
   {
@@ -502,7 +542,7 @@ static int gt_search_for_TSDs(GtTIRStream *tir_stream, TIRPair *tir_pair, const 
 
   /* vicinity of 3'-border of right tir
      do not align over 5'border of right tir */
-  if(tir_pair->right_tir_end - tir_stream->vicinity < tir_pair->right_tir_start)
+  if(tir_pair->right_tir_end < tir_pair->right_tir_start + tir_stream->vicinity)
   {
     start_right_tir = tir_pair->right_tir_start;
   }
@@ -589,7 +629,6 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
   GtArrayMyfrontvalue fronts; /* needed to use xdrop */
   Myxdropbest xdropbest_left; /* return parameters for xdrop */
   Myxdropbest xdropbest_right;
-  //unsigned long alignment_length = 0,
   unsigned long total_length = 0,
                 left_tir_length = 0, 
                 right_tir_length = 0,
@@ -607,11 +646,11 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
   gt_error_check(err);
   
   /* Iterating over seeds */
-  for(seedcounter = 0; seedcounter < tir_stream->seedarray.nextfreeSeed;
+  for(seedcounter = 0; seedcounter < tir_stream->seedinfo.seed.nextfreeSeed;
       seedcounter++)
   {
     /* Getting the seed entry at position seedcounter */
-    seedptr = &(tir_stream->seedarray.spaceSeed[seedcounter]);
+    seedptr = &(tir_stream->seedinfo.seed.spaceSeed[seedcounter]);
     
     /* Initialize array for extending seeds */
     GT_INITARRAY (&fronts, Myfrontvalue);
@@ -679,11 +718,16 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
     
     /* Calculate TIR lengths and distance*/
     left_tir_length = pair->left_tir_end - pair->left_tir_start + 1;
-    right_tir_length = pair->right_tir_end - pair->right_tir_start + 1; //TODO überlegen ob das stimmt; assertion einbauen
+    right_tir_length = pair->right_tir_end - pair->right_tir_start + 1;
+    
+    /* needed because of border change by search_forTSDs */
+    right_tir_start = GT_REVERSEPOS(total_length, pair->right_tir_end);
+    right_tir_end = GT_REVERSEPOS(total_length, pair->right_tir_start);
+    
+    gt_assert( pair->right_tir_end - pair->right_tir_start + 1 == (right_tir_end - right_tir_start + 1));
     distance = pair->right_tir_start - pair->left_tir_start;
     
     /* Realloc tir_char if length too high */
-    //TODO das rausnehmen und immer neuen speicher verwenden und abräumen gt_malloc und gt_free
     if(left_tir_length > max_left_length)
     {
       max_left_length = left_tir_length;
@@ -696,18 +740,14 @@ static int gt_searchforTIRs(GtTIRStream *tir_stream,
     }
     
     /* Store encoded substring */
-
-   	//TODO hier auch mal decoded ausprobieren (left_tir_char ist dann ein normaler string)
     gt_encseq_extract_encoded(encseq, left_tir_char,
                                          pair->left_tir_start,
                                          pair->left_tir_end);
-   //TODO right_tir_end und right_tir_start überprüfen
     gt_encseq_extract_encoded(encseq, right_tir_char,
-                                         right_tir_end,
-                                         right_tir_start);
+                                         right_tir_start,
+                                         right_tir_end);
     
     /* Get edit distance */
-    //TODO mal ausgeben, was hier übergeben wird | tail -n #Zeilenvonhinten
     edist = greedyunitedist(left_tir_char,(unsigned long) left_tir_length, 
                             right_tir_char,(unsigned long) right_tir_length);
                             
@@ -802,12 +842,11 @@ static int gt_tir_stream_next(GtNodeStream *ns,
                       gt_readmodeSequentialsuffixarrayreader(tir_stream->ssar),
                       (unsigned int) tir_stream->min_seed_length,
                       gt_store_seeds,
-                      &tir_stream->seedarray,
+                      &tir_stream->seedinfo,
                       err) != 0)
     {
       had_err = -1;
     }
-    
     /* extend seeds to TIRs and check TIRs */
     if(!had_err && gt_searchforTIRs(tir_stream, &tir_stream->tir_pairs, tir_stream->encseq, err) != 0)
     {
@@ -815,7 +854,7 @@ static int gt_tir_stream_next(GtNodeStream *ns,
     }
 
     /* free the seed array since we don't need it any longer */
-    GT_FREEARRAY(&tir_stream->seedarray, Seed);
+    GT_FREEARRAY(&tir_stream->seedinfo.seed, Seed);
     
 
     tir_stream->state = GT_TIR_STREAM_STATE_REGIONS;
@@ -1098,6 +1137,11 @@ GtNodeStream* gt_tir_stream_new(GtStr *str_indexname,
   tir_stream->max_TSD_length = max_TSD_length;
   tir_stream->vicinity = vicinity;
 
+	tir_stream->seedinfo.max_tir_length = max_TIR_length;
+	tir_stream->seedinfo.min_tir_length = min_TIR_length;
+	tir_stream->seedinfo.max_tir_distance = max_TIR_distance;
+	tir_stream->seedinfo.min_tir_distance = min_TIR_distance;
+	
   tir_stream->ssar = 
       gt_newSequentialsuffixarrayreaderfromfile(gt_str_get(str_indexname),
                                                 SARR_LCPTAB | SARR_SUFTAB |
@@ -1113,7 +1157,7 @@ GtNodeStream* gt_tir_stream_new(GtStr *str_indexname,
   }
   
   tir_stream->encseq = gt_encseqSequentialsuffixarrayreader(tir_stream->ssar);
-  GT_INITARRAY(&tir_stream->seedarray, Seed);
+  GT_INITARRAY(&tir_stream->seedinfo.seed, Seed);
   GT_INITARRAY(&tir_stream->tir_pairs, TIRPair);
   
   
