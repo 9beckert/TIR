@@ -130,7 +130,7 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   optionminlentir = gt_option_new_ulong_min_max("mintirlen",
                                "specify minimum length for each TIR",
                                &arguments->min_TIR_length,
-                               100UL,
+                               27UL,
                                1UL,
                                GT_UNDEF_ULONG);
   gt_option_parser_add_option(op, optionminlentir);
@@ -148,7 +148,7 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   optionmindisttir = gt_option_new_ulong_min_max("mintirdist",
                                "specify minimum distance of TIRs",
                                &arguments->min_TIR_distance,
-                               1000UL,
+                               100UL,
                                1UL,
                                GT_UNDEF_ULONG);
   gt_option_parser_add_option(op, optionmindisttir);
@@ -157,7 +157,7 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   optionmaxdisttir = gt_option_new_ulong_min_max("maxtirdist",
                                "specify maximum distance of TIRs",
                                &arguments->max_TIR_distance,
-                               15000UL,
+                               10000UL,
                                1UL,
                                GT_UNDEF_ULONG);
   gt_option_parser_add_option(op, optionmaxdisttir);   
@@ -231,7 +231,7 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   optionmintsd = gt_option_new_ulong_min_max("mintsd",
                               "specify minimum length for each TSD",
                                &arguments->min_TSD_length,
-                               4U,
+                               2U,
                                0,
                                GT_UNDEF_UINT);
   gt_option_parser_add_option(op, optionmintsd);
@@ -240,7 +240,7 @@ static GtOptionParser* gt_tir_option_parser_new(void *tool_arguments)
   optionmaxtsd = gt_option_new_ulong_min_max("maxtsd",
                               "specify maximum length for each TSD",
                                &arguments->max_TSD_length,
-                               20U,
+                               11U,
                                0,
                                GT_UNDEF_UINT);
   gt_option_parser_add_option(op, optionmaxtsd);
