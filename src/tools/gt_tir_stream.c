@@ -1028,8 +1028,27 @@ static int gt_tir_stream_next(GtNodeStream *ns,
 
       /* target site duplication */
       
-      // TODO child of region
-      
+		if (tir_stream->min_TSD_length > 1U) 
+		{
+			node = gt_feature_node_new(seqid,
+									   "target_site_duplication",
+									   pair->left_tir_start - seqstartpos + 1
+										 - pair->tsd_length,
+									   pair->left_tir_start - seqstartpos,
+									   GT_STRAND_UNKNOWN);
+			gt_feature_node_set_source((GtFeatureNode*) node, source);
+			gt_feature_node_add_child((GtFeatureNode*) parent,
+									  (GtFeatureNode*) node);
+			node = gt_feature_node_new(seqid,
+									   "target_site_duplication",
+									   pair->right_tir_end - seqstartpos + 1, /* hier war + 2 warum? */
+									   pair->right_tir_end - seqstartpos + 1
+										 + pair->tsd_length,
+									   GT_STRAND_UNKNOWN);
+			gt_feature_node_set_source((GtFeatureNode*) node, source);
+			gt_feature_node_add_child((GtFeatureNode*) parent,
+									  (GtFeatureNode*) node);
+		  }
       
       /* terminal inverted repeat element */
       
